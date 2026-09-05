@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.util.Log
+import android.view.InputDevice
 import android.view.KeyEvent
 import androidx.activity.result.ActivityResultCallback
 import androidx.activity.result.ActivityResultLauncher
@@ -35,6 +36,8 @@ import java.util.concurrent.atomic.AtomicInteger
 class MainActivity : FlutterFragmentActivity() {
     var volumeListen = VolumeListen()
     var listening = false
+
+    var keySink: EventChannel.EventSink? = null
 
     private val storageRequestCode = 0x10
     private var storagePermissionRequest: ((Boolean) -> Unit)? = null
@@ -158,6 +161,18 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             })
 
+        val keysChannel = EventChannel(flutterEngine.dartExecutor.binaryMessenger, "venera/keys")
+        keysChannel.setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                    keySink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    keySink = null
+                }
+            })
+
         val storageChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "venera/storage")
         storageChannel.setMethodCallHandler { _, res ->
             requestStoragePermission { result ->
@@ -217,6 +232,64 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    /// Intercept gamepad / media keys while the reader (or the key mapping
+    /// page) is listening, so they do not trigger focus navigation. Keyboard
+    /// keys keep going through Flutter's own key pipeline. Back and menu are
+    /// never consumed.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (listening) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        volumeListen.down()
+                    }
+                    return true
+                }
+
+                KeyEvent.KEYCODE_VOLUME_UP -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        volumeListen.up()
+                    }
+                    return true
+                }
+            }
+        }
+        if (forwardHardwareKey(event)) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun forwardHardwareKey(e: KeyEvent): Boolean {
+        val sink = keySink ?: return false
+        if (e.action != KeyEvent.ACTION_DOWN) {
+            // Consume repeat events, let unmatched key-up events pass through.
+            return e.repeatCount > 0
+        }
+        when (e.keyCode) {
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_MENU -> return false
+        }
+        // Classify primarily by key code so controllers that report an
+        // unexpected source (keyboard/joystick) are still handled.
+        val source = when (e.keyCode) {
+            in KeyEvent.KEYCODE_BUTTON_A..KeyEvent.KEYCODE_BUTTON_MODE -> "gamepad"
+            in KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE..KeyEvent.KEYCODE_MEDIA_RECORD -> "media"
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_CENTER -> "dpad"
+            else -> {
+                val isGamepad = e.source and InputDevice.SOURCE_GAMEPAD != 0 ||
+                    e.source and InputDevice.SOURCE_JOYSTICK != 0
+                if (isGamepad) "gamepad" else return false
+            }
+        }
+        Log.d("VeneraKeys", "forward $source:${e.keyCode}")
+        sink.success("$source:${e.keyCode}")
+        return true
     }
 
     /// Ensure that the directory is accessible by dart:io

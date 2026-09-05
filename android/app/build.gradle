@@ -27,12 +27,15 @@ if (flutterVersionName == null) {
 
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
-keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
 
 android {
     namespace = "com.github.wgh136.venera"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion "28.0.13004108"
+    ndkVersion "28.2.13676358"
 
     packaging {
         jniLibs {
@@ -59,21 +62,42 @@ android {
 
     signingConfigs {
         debug {
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
+            if (hasReleaseKeystore) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            } else {
+                // Fall back to the default debug keystore when key.properties
+                // is absent, so local builds work without a release key.
+                storeFile System.getenv("DEBUG_KEYSTORE") != null
+                        ? file(System.getenv("DEBUG_KEYSTORE"))
+                        : file("${System.properties['user.home']}/.android/debug.keystore")
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+            }
         }
         release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
+            if (hasReleaseKeystore) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            } else {
+                // Reuse debug credentials so local builds can be signed;
+                // define key.properties to sign with a real release key.
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+                storeFile file("${System.properties['user.home']}/.android/debug.keystore")
+                storePassword "android"
+            }
         }
     }
 
     defaultConfig {
-        applicationId = "com.github.wgh136.venera"
+        // Suffixed so the build can be installed alongside the official app.
+        applicationId = "com.github.wgh136.venera.mod"
         // You can update the following values to match your application needs.
         // For more information, see: https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
         minSdk = flutter.minSdkVersion

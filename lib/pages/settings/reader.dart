@@ -300,6 +300,77 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             useDeviceSettings: useDeviceSpecificSettings,
           ),
         ),
+        SliverAnimatedVisibility(
+          visible: appdata.settings['readerMode']!.startsWith('continuous'),
+          child: SelectSetting(
+            title: "Auto play mode".tl,
+            settingKey: "autoPlayMode",
+            optionTranslation: {
+              "smoothScroll": "Smooth Scroll".tl,
+              "pageTurning": "Timed Page Turning".tl,
+            },
+            onChanged: () {
+              widget.onChanged?.call("autoPlayMode");
+            },
+            comicId: isEnabledSpecificSettings ? widget.comicId : null,
+            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+            useDeviceSettings: useDeviceSpecificSettings,
+          ),
+        ),
+        SliverAnimatedVisibility(
+          visible: appdata.settings['readerMode']!.startsWith('continuous'),
+          child: _SliderSetting(
+            title: "Auto scroll time per screen (ms)".tl,
+            settingsIndex: "autoScrollMsPerScreen",
+            interval: 500,
+            min: 1000,
+            max: 60000,
+            onChanged: () {
+              widget.onChanged?.call("autoScrollMsPerScreen");
+            },
+            comicId: isEnabledSpecificSettings ? widget.comicId : null,
+            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+            useDeviceSettings: useDeviceSpecificSettings,
+          ),
+        ),
+        SliverAnimatedVisibility(
+          visible: appdata.settings['readerMode']!.startsWith('continuous'),
+          child: SelectSetting(
+            title: "Auto scroll at chapter end".tl,
+            settingKey: "autoScrollOnChapterEnd",
+            optionTranslation: {
+              "stop": "Stop".tl,
+              "nextChapter": "Continue with next chapter".tl,
+            },
+            onChanged: () {
+              widget.onChanged?.call("autoScrollOnChapterEnd");
+            },
+            comicId: isEnabledSpecificSettings ? widget.comicId : null,
+            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+            useDeviceSettings: useDeviceSpecificSettings,
+          ),
+        ),
+        SliverAnimatedVisibility(
+          visible: appdata.settings['readerMode']!.startsWith('continuous'),
+          child: _SwitchSetting(
+            title: "Resume auto scroll after touch".tl,
+            settingKey: "autoScrollResumeAfterTouch",
+            onChanged: () {
+              widget.onChanged?.call("autoScrollResumeAfterTouch");
+            },
+            comicId: isEnabledSpecificSettings ? widget.comicId : null,
+            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+            useDeviceSettings: useDeviceSpecificSettings,
+          ),
+        ),
+        if (App.isAndroid)
+          _CallbackSetting(
+            title: "Hardware Key Mapping".tl,
+            subtitle:
+                "Map gamepad, keyboard and media keys to reader actions".tl,
+            callback: () => context.to(() => _KeyMappingPage()),
+            actionTitle: "Edit".tl,
+          ).toSliver(),
         _SwitchSetting(
           title: 'Double tap to zoom'.tl,
           settingKey: 'enableDoubleTapToZoom',
@@ -441,6 +512,183 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
             useDeviceSettings: useDeviceSpecificSettings,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _KeyMappingPage extends StatefulWidget {
+  const _KeyMappingPage();
+
+  @override
+  State<_KeyMappingPage> createState() => _KeyMappingPageState();
+}
+
+class _KeyMappingPageState extends State<_KeyMappingPage> {
+  Map<String, String> get _map =>
+      (appdata.settings['inputKeyMap'] as Map?)?.cast<String, String>() ?? {};
+
+  void _save(Map<String, String> map) {
+    appdata.settings['inputKeyMap'] = map;
+    appdata.saveData();
+    setState(() {});
+  }
+
+  void _addBinding(InputAction action) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return _KeyCaptureDialog(
+          onKey: (key) {
+            var map = Map.of(_map);
+            // A key can only be bound to one action.
+            map.remove(key.id);
+            map[key.id] = action.name;
+            _save(map);
+          },
+        );
+      },
+    );
+  }
+
+  void _removeBinding(String keyId) {
+    var map = Map.of(_map);
+    map.remove(keyId);
+    _save(map);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: Appbar(
+        title: Text("Hardware Key Mapping".tl),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _save(Map.of(defaultInputKeyMap));
+            },
+            child: Text("Reset".tl),
+          ),
+        ],
+      ),
+      body: ListView(
+        children: [
+          for (var action in InputAction.values)
+            ListTile(
+              title: Text(action.displayName.tl),
+              subtitle: _bindingsText(action),
+              onTap: () => _addBinding(action),
+              trailing: const Icon(Icons.add),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              "Tap an action and press any key on your gamepad, keyboard or media device to bind it. Tap a binding to remove it."
+                  .tl,
+              style: TextStyle(color: context.colorScheme.outline),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bindingsText(InputAction action) {
+    var bindings = _map.entries
+        .where((e) => e.value == action.name)
+        .map((e) => parseHardwareKey(e.key)?.displayName ?? e.key)
+        .toList();
+    if (bindings.isEmpty) {
+      return Text("Not set".tl,
+          style: TextStyle(color: context.colorScheme.outline));
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      children: [
+        for (var binding in bindings)
+          ActionChip(
+            label: Text(binding, style: ts.s12),
+            onPressed: () {
+              var entry = _map.entries.firstWhere(
+                (e) =>
+                    e.value == action.name &&
+                    (parseHardwareKey(e.key)?.displayName ?? e.key) == binding,
+              );
+              _removeBinding(entry.key);
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class _KeyCaptureDialog extends StatefulWidget {
+  const _KeyCaptureDialog({required this.onKey});
+
+  final void Function(HardwareKey key) onKey;
+
+  @override
+  State<_KeyCaptureDialog> createState() => _KeyCaptureDialogState();
+}
+
+class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
+  HardwareKeyListener? _hardwareKeyListener;
+  final _focusNode = FocusNode();
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      Navigator.of(context).pop();
+      return KeyEventResult.handled;
+    }
+    Navigator.of(context).pop();
+    widget.onKey(HardwareKey.fromLogicalKey(event.logicalKey));
+    return KeyEventResult.handled;
+  }
+
+  void _onHardwareKey(HardwareKey key) {
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    widget.onKey(key);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (App.isAndroid) {
+      _hardwareKeyListener = HardwareKeyListener(onKey: _onHardwareKey)
+        ..listen();
+    }
+  }
+
+  @override
+  void dispose() {
+    _hardwareKeyListener?.cancel();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text("Press a key".tl),
+      content: Focus(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: _onKeyEvent,
+        child: Text(
+          "Press any key on your gamepad, keyboard or media device to bind it. Press Escape to cancel."
+              .tl,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text("Cancel".tl),
         ),
       ],
     );

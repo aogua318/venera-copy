@@ -703,12 +703,29 @@ class _ContinuousModeState extends State<_ContinuousMode>
   bool isZoomedIn = false;
   bool isLongPressing = false;
 
+  AutoScrollEngine? _autoScroll;
+
+  /// Whether auto scroll was paused by a user touch and should be
+  /// resumed when the touch ends.
+  bool _autoScrollPausedByTouch = false;
+
   @override
   void initState() {
     reader = context.reader;
     reader._imageViewController = this;
     itemPositionsListener.itemPositions.addListener(onPositionChanged);
     cached = List.filled(reader.maxPage + 2, false);
+    if (reader.autoScrollResumeAfterChapter) {
+      reader.autoScrollResumeAfterChapter = false;
+      // Can not call reader.setAutoScrollActive here, it triggers setState
+      // during build. The scaffold state is refreshed once scrolling starts.
+      reader._autoScrollActive = true;
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted && reader._autoScrollActive) {
+          _startAutoScroll();
+        }
+      });
+    }
     Future.delayed(
       const Duration(milliseconds: 100),
       () => cacheImages(reader.page),
@@ -718,8 +735,117 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   @override
   void dispose() {
+    _autoScroll?.pause();
     itemPositionsListener.itemPositions.removeListener(onPositionChanged);
     super.dispose();
+  }
+
+  int get _autoScrollMsPerScreen {
+    return appdata.settings.getReaderSetting(
+      reader.cid,
+      reader.type.sourceKey,
+      'autoScrollMsPerScreen',
+    );
+  }
+
+  void toggleAutoScroll() {
+    if (_autoScroll?.isRunning ?? false) {
+      _stopAutoScroll();
+    } else {
+      _startAutoScroll();
+    }
+  }
+
+  void _startAutoScroll() {
+    if (!(_scrollController?.hasClients ?? false)) return;
+    _autoScroll ??= AutoScrollEngine(
+      getPosition: () => scrollController.position,
+      msPerScreen: _getAutoScrollMsPerScreen,
+      onReachEnd: onAutoScrollReachEnd,
+    );
+    if (_autoScroll!.start(
+      forward: reader.mode != ReaderMode.continuousRightToLeft,
+    )) {
+      reader.setAutoScrollActive(true);
+      _autoScrollPausedByTouch = false;
+    } else {
+      reader.setAutoScrollActive(false);
+    }
+  }
+
+  int _getAutoScrollMsPerScreen() => _autoScrollMsPerScreen;
+
+  void _stopAutoScroll() {
+    _autoScroll?.pause();
+    reader.setAutoScrollActive(false);
+    _autoScrollPausedByTouch = false;
+  }
+
+  /// Pause auto scroll when the user touches the screen.
+  void _pauseAutoScrollByTouch() {
+    if (_autoScroll?.isRunning ?? false) {
+      _autoScroll!.pause();
+      reader.setAutoScrollActive(false);
+      _autoScrollPausedByTouch = true;
+      context.readerScaffold.update();
+    }
+  }
+
+  void _resumeAutoScrollByTouchIfNeeded() {
+    if (!_autoScrollPausedByTouch) return;
+    _autoScrollPausedByTouch = false;
+    var resume = appdata.settings.getReaderSetting(
+      reader.cid,
+      reader.type.sourceKey,
+      'autoScrollResumeAfterTouch',
+    );
+    if (resume == true) {
+      _startAutoScroll();
+    }
+  }
+
+  void onAutoScrollReachEnd() async {
+    reader.setAutoScrollActive(false);
+    var behavior = appdata.settings.getReaderSetting(
+      reader.cid,
+      reader.type.sourceKey,
+      'autoScrollOnChapterEnd',
+    );
+    if (behavior == 'nextChapter') {
+      // When there is no next chapter, continue with the next comic.
+      if (!reader.toNextChapter()) {
+        await reader.toNeighborComic(true);
+      } else {
+        reader.autoScrollResumeAfterChapter = true;
+      }
+    }
+    context.readerScaffold.update();
+  }
+
+  /// Scroll forward by one screen. Used by hardware key actions.
+  void pageForward() {
+    _scrollByViewport(true);
+  }
+
+  /// Scroll backward by one screen. Used by hardware key actions.
+  void pageBackward() {
+    _scrollByViewport(false);
+  }
+
+  void _scrollByViewport(bool forward) {
+    if (!(_scrollController?.hasClients ?? false)) return;
+    var position = scrollController.position;
+    var forwardScroll = reader.mode != ReaderMode.continuousRightToLeft;
+    if (!forward) forwardScroll = !forwardScroll;
+    var target = (position.pixels +
+            (forwardScroll ? 1 : -1) * position.viewportDimension)
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+    scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.ease,
+    );
   }
 
   void onPositionChanged() {
@@ -900,6 +1026,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
     widget = Listener(
       onPointerDown: (event) {
         fingers++;
+        _pauseAutoScrollByTouch();
         if (fingers > 1 && !disableScroll) {
           setState(() {
             disableScroll = true;
@@ -927,6 +1054,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
             context.readerScaffold.setFloatingButton(0);
             reader.toNextChapter();
           }
+          _resumeAutoScrollByTouchIfNeeded();
         }
       },
       onPointerCancel: (event) {

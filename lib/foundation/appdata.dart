@@ -232,6 +232,15 @@ class Settings with ChangeNotifier {
     'deviceId': '',
     'ignoreBadCertificate': false,
     'readerScrollSpeed': 1.0, // 0.5 - 3.0
+    'autoScrollMsPerScreen':
+        5000, // milliseconds to scroll one screen height in continuous mode
+    'autoScrollOnChapterEnd': 'stop', // stop, nextChapter
+    'autoScrollResumeAfterTouch': false,
+    'autoPlayMode': 'smoothScroll', // smoothScroll, pageTurning
+    'bookshelfSortMode': 'addedTime', // addedTime, name, lastRead
+    'bookshelfSortDesc': false,
+    'bookshelfViewMode': 'grid', // list, grid, waterfall
+    'inputKeyMap': <String, String>{}, // "source:keyCode" -> InputAction name
     'localFavoritesFirst': true,
     'autoCloseFavoritePanel': false,
     'showChapterComments': true, // show chapter comments in reader

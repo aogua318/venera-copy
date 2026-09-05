@@ -19,6 +19,7 @@ import 'package:venera/components/rich_comment_content.dart';
 import 'package:venera/components/window_frame.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/bookshelf.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
@@ -37,6 +38,7 @@ import 'package:venera/utils/clipboard_image.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/file_type.dart';
+import 'package:venera/utils/hardware_keys.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/tags_translation.dart';
 import 'package:venera/utils/translations.dart';
@@ -58,6 +60,8 @@ part 'loading.dart';
 part 'chapters.dart';
 
 part 'chapter_comments.dart';
+
+part 'auto_scroll.dart';
 
 extension _ReaderContext on BuildContext {
   _ReaderState get reader => findAncestorStateOfType<_ReaderState>()!;
@@ -226,6 +230,10 @@ class _ReaderState extends State<Reader>
     )) {
       handleVolumeEvent();
     }
+    if (App.isAndroid) {
+      _hardwareKeyListener = HardwareKeyListener(onKey: handleHardwareKey)
+        ..listen();
+    }
     setImageCacheSize();
     Future.delayed(const Duration(milliseconds: 200), () {
       LocalFavoritesManager().onRead(cid, type);
@@ -275,6 +283,7 @@ class _ReaderState extends State<Reader>
     }
     autoPageTurningTimer?.cancel();
     focusNode.dispose();
+    _hardwareKeyListener?.cancel();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     stopVolumeEvent();
     Future.microtask(() {
@@ -309,10 +318,201 @@ class _ReaderState extends State<Reader>
   }
 
   void onKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      var id = "fl:${event.logicalKey.keyId}";
+      var actionName = _inputKeyMap[id];
+      if (actionName == null &&
+          event.logicalKey.keyId >= 0x00200000000 &&
+          event.logicalKey.keyId < 0x00300000000) {
+        // Android-plane key ids also match the channel id space used by
+        // default bindings.
+        actionName = _inputKeyMap["fl:${event.logicalKey.keyId}"];
+      }
+      var action = actionName == null ? null : InputAction.tryParse(actionName);
+      if (action != null) {
+        debugPrint("VeneraKeys: keyboard $id -> $actionName");
+        handleInputAction(action);
+        return;
+      }
+    }
     if (event.logicalKey == LogicalKeyboardKey.f12 && event is KeyUpEvent) {
       fullscreen();
     }
     _imageViewController?.handleKeyEvent(event);
+  }
+
+  bool _autoScrollActive = false;
+
+  HardwareKeyListener? _hardwareKeyListener;
+
+  /// Whether auto scroll should be resumed in the next chapter after it ends.
+  bool autoScrollResumeAfterChapter = false;
+
+  bool get isAutoScrolling => autoPageTurningTimer != null || _autoScrollActive;
+
+  void setAutoScrollActive(bool value) {
+    if (_autoScrollActive != value) {
+      _autoScrollActive = value;
+      update();
+    }
+  }
+
+  /// The effective key map. When the user has no custom bindings, fall back
+  /// to [defaultInputKeyMap] so hardware keys work out of the box.
+  Map<String, String> get _inputKeyMap {
+    var map = (appdata.settings['inputKeyMap'] as Map?)?.cast<String, String>();
+    if (map == null || map.isEmpty) {
+      return defaultInputKeyMap;
+    }
+    return map;
+  }
+
+  void handleHardwareKey(HardwareKey key) {
+    var actionName = _inputKeyMap[key.id];
+    if (actionName == null) return;
+    var action = InputAction.tryParse(actionName);
+    debugPrint("VeneraKeys: handle $key.id -> $actionName");
+    if (action != null) {
+      handleInputAction(action);
+    }
+  }
+
+  void handleInputAction(InputAction action) {
+    switch (action) {
+      case InputAction.nextPage:
+        if (mode.isContinuous) {
+          (_imageViewController as _ContinuousModeState?)?.pageForward();
+        } else if (!toNextPage()) {
+          toNextChapterOrComic();
+        }
+      case InputAction.prevPage:
+        if (mode.isContinuous) {
+          (_imageViewController as _ContinuousModeState?)?.pageBackward();
+        } else if (!toPrevPage()) {
+          toPrevChapterOrComic(toLastPage: true);
+        }
+      case InputAction.toggleAutoScroll:
+        toggleAutoPlay();
+      case InputAction.nextChapter:
+        toNextChapterOrComic();
+      case InputAction.prevChapter:
+        toPrevChapterOrComic();
+    }
+  }
+
+  /// Switch to the previous chapter. Falls back to the previous comic in the
+  /// bookshelf when there is no previous chapter.
+  Future<void> toPrevChapterOrComic({bool toLastPage = false}) async {
+    if (!toPrevChapter(toLastPage: toLastPage)) {
+      await toNeighborComic(false);
+    }
+  }
+
+  /// Switch to the next chapter. Falls back to the next comic in the
+  /// bookshelf when there is no next chapter.
+  Future<void> toNextChapterOrComic() async {
+    if (!toNextChapter()) {
+      await toNeighborComic(true);
+    }
+  }
+
+  /// Toggle auto play. In continuous mode the behavior depends on the
+  /// `autoPlayMode` setting: smooth scrolling or timed page turning.
+  void toggleAutoPlay() {
+    var isSmooth = mode.isContinuous &&
+        appdata.settings.getReaderSetting(cid, type.sourceKey, 'autoPlayMode') !=
+            'pageTurning';
+    if (isSmooth) {
+      var controller = _imageViewController;
+      if (controller is _ContinuousModeState) {
+        controller.toggleAutoScroll();
+      }
+    } else {
+      autoPageTurning(cid, type);
+    }
+  }
+
+  /// Whether the reader is on the very first page of the comic.
+  bool get isOnFirstPage => chapter == 1 && page == 1;
+
+  /// Whether the reader is on the very last page of the comic.
+  ///
+  /// In continuous mode the last page can not always be displayed fully, the
+  /// scroll position settles on the second-to-last page. Treat
+  /// `maxPage - 1` as the end in that case.
+  bool get isOnLastPage {
+    if (chapter != maxChapter) return false;
+    if (mode.isContinuous) {
+      return maxPage <= 1 ? page >= maxPage : page >= maxPage - 1;
+    }
+    return page == maxPage;
+  }
+
+  /// Switch to the previous or next comic in the bookshelf. Returns false if
+  /// the current comic is not in the bookshelf or there is no neighbor.
+  Future<bool> toNeighborComic(bool next) async {
+    var shelf = BookshelfManager().sortedItems();
+    var index = shelf.indexWhere((e) => e.id == cid && e.type == type);
+    if (index < 0) {
+      return false;
+    }
+    var targetIndex = next ? index + 1 : index - 1;
+    if (targetIndex < 0 || targetIndex >= shelf.length) {
+      showToast(
+        context: App.rootContext,
+        message: next ? "This is the last book".tl : "This is the first book".tl,
+      );
+      return false;
+    }
+    var entry = shelf[targetIndex];
+    var comic = entry.resolveComic();
+    if (comic == null) {
+      showToast(context: App.rootContext, message: "Comic not found".tl);
+      return false;
+    }
+    Widget page;
+    if (comic is LocalComic) {
+      var history = HistoryManager().find(comic.id, ComicType.local);
+      page = Reader(
+        type: ComicType.local,
+        cid: comic.id,
+        name: comic.title,
+        chapters: comic.chapters,
+        initialPage: history?.page,
+        initialChapter: history?.ep,
+        initialChapterGroup: history?.group,
+        history: history ?? History.fromModel(model: comic, ep: 0, page: 0),
+        author: comic.subTitle ?? '',
+        tags: comic.tags,
+      );
+    } else {
+      var source = entry.type.comicSource;
+      if (source?.loadComicInfo == null) {
+        showToast(context: App.rootContext, message: "Comic not found".tl);
+        return false;
+      }
+      var res = await source!.loadComicInfo!(entry.id);
+      if (res.error) {
+        showToast(context: App.rootContext, message: res.errorMessage ?? "Error");
+        return false;
+      }
+      var details = res.data;
+      var history = HistoryManager().find(entry.id, entry.type);
+      page = Reader(
+        type: entry.type,
+        cid: entry.id,
+        name: details.title,
+        chapters: details.chapters,
+        initialPage: history?.page,
+        initialChapter: history?.ep,
+        initialChapterGroup: history?.group,
+        history: history ?? History.fromModel(model: details, ep: 0, page: 0),
+        author: details.subTitle ?? '',
+        tags: details.tags.values.expand((e) => e).toList(),
+      );
+    }
+    App.rootContext.toReplacement(() => page);
+    return true;
   }
 
   @override
@@ -556,17 +756,21 @@ abstract mixin class _VolumeListener {
 
   bool toPrevChapter({bool toLastPage = false});
 
+  Future<void> toNextChapterOrComic();
+
+  Future<void> toPrevChapterOrComic({bool toLastPage = false});
+
   VolumeListener? volumeListener;
 
   void onDown() {
     if (!toNextPage()) {
-      toNextChapter();
+      toNextChapterOrComic();
     }
   }
 
   void onUp() {
     if (!toPrevPage()) {
-      toPrevChapter(toLastPage: true);
+      toPrevChapterOrComic(toLastPage: true);
     }
   }
 

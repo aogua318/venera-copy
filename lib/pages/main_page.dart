@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/pages/bookshelf_page.dart';
 import 'package:venera/pages/categories_page.dart';
 import 'package:venera/pages/search_page.dart';
 import 'package:venera/pages/settings/settings_page.dart';
@@ -46,6 +47,9 @@ class _MainPageState extends State<MainPage> {
 
   final _pages = [
     const HomePage(),
+    const BookshelfPage(
+      key: PageStorageKey('bookshelf'),
+    ),
     const FavoritesPage(
       key: PageStorageKey('favorites'),
     ),
@@ -70,6 +74,11 @@ class _MainPageState extends State<MainPage> {
           label: 'Home'.tl,
           icon: Icons.home_outlined,
           activeIcon: Icons.home,
+        ),
+        PaneItemEntry(
+          label: 'Bookshelf'.tl,
+          icon: Icons.book_outlined,
+          activeIcon: Icons.book,
         ),
         PaneItemEntry(
           label: 'Favorites'.tl,

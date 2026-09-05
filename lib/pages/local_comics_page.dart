@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/bookshelf.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
@@ -113,6 +114,18 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
 
   Widget buildMultiSelectMenu() {
     return MenuButton(entries: [
+      MenuEntry(
+        icon: Icons.book_outlined,
+        text: "Add to bookshelf".tl,
+        onClick: () {
+          BookshelfManager().addAll(selectedComics.keys
+              .map((e) => (e.id, ComicType.local)));
+          showToast(
+            context: context,
+            message: "Added to bookshelf".tl,
+          );
+        },
+      ),
       MenuEntry(
         icon: Icons.delete_outline,
         text: "Delete".tl,

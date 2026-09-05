@@ -404,6 +404,14 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
           onPressed: addImageFavorite,
         ),
       ),
+      if (context.reader.type == ComicType.local)
+        Tooltip(
+          message: "Set as Cover".tl,
+          child: IconButton(
+            icon: const Icon(Icons.image_outlined),
+            onPressed: setAsCover,
+          ),
+        ),
       if (App.isDesktop)
         Tooltip(
           message: "${"Full Screen".tl}(F12)",
@@ -454,17 +462,26 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
           ),
         ),
       Tooltip(
-        message: "Auto Page Turning".tl,
+        message: context.reader.mode.isContinuous &&
+                appdata.settings.getReaderSetting(
+                      context.reader.cid,
+                      context.reader.type.sourceKey,
+                      'autoPlayMode',
+                    ) !=
+                    'pageTurning'
+            ? "Auto Scroll".tl
+            : "Auto Page Turning".tl,
         child: IconButton(
-          icon: context.reader.autoPageTurningTimer != null
-              ? const Icon(Icons.timer)
-              : const Icon(Icons.timer_sharp),
+          icon: context.reader.isAutoScrolling
+              ? const Icon(Icons.pause_circle_outline)
+              : const Icon(Icons.play_circle_outline),
           onPressed: () {
-            context.reader.autoPageTurning(
-              context.reader.cid,
-              context.reader.type,
-            );
+            context.reader.toggleAutoPlay();
             update();
+            // Hide the toolbar when auto scroll starts.
+            if (context.reader.isAutoScrolling && _isOpen) {
+              openOrClose();
+            }
           },
         ),
       ),
@@ -498,24 +515,26 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
             children: [
               const SizedBox(width: 8),
               IconButton.filledTonal(
-                onPressed: () => !isReversed
-                    ? context.reader.chapter > 1
-                          ? context.reader.toPrevChapter()
-                          : context.reader.toPage(1)
-                    : context.reader.chapter < context.reader.maxChapter
-                    ? context.reader.toNextChapter()
-                    : context.reader.toPage(context.reader.maxPage),
+                onPressed: () {
+                  var reader = context.reader;
+                  if (!isReversed) {
+                    _gotoFirstPage(reader);
+                  } else {
+                    _gotoLastPage(reader);
+                  }
+                },
                 icon: const Icon(Icons.first_page),
               ),
               Expanded(child: buildSlider()),
               IconButton.filledTonal(
-                onPressed: () => !isReversed
-                    ? context.reader.chapter < context.reader.maxChapter
-                          ? context.reader.toNextChapter()
-                          : context.reader.toPage(context.reader.maxPage)
-                    : context.reader.chapter > 1
-                    ? context.reader.toPrevChapter()
-                    : context.reader.toPage(1),
+                onPressed: () {
+                  var reader = context.reader;
+                  if (!isReversed) {
+                    _gotoLastPage(reader);
+                  } else {
+                    _gotoFirstPage(reader);
+                  }
+                },
                 icon: const Icon(Icons.last_page),
               ),
               const SizedBox(width: 8),
@@ -578,6 +597,30 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
   }
 
   var sliderFocus = FocusNode();
+
+  /// First page button. When already on the very first page of the comic,
+  /// switch to the previous comic in the bookshelf.
+  void _gotoFirstPage(_ReaderState reader) {
+    if (reader.isOnFirstPage) {
+      reader.toNeighborComic(false);
+    } else if (reader.chapter > 1) {
+      reader.toPrevChapter();
+    } else {
+      reader.toPage(1);
+    }
+  }
+
+  /// Last page button. When already on the very last page of the comic,
+  /// switch to the next comic in the bookshelf.
+  void _gotoLastPage(_ReaderState reader) {
+    if (reader.isOnLastPage) {
+      reader.toNeighborComic(true);
+    } else if (reader.chapter < reader.maxChapter) {
+      reader.toNextChapter();
+    } else {
+      reader.toPage(reader.maxPage);
+    }
+  }
 
   Widget buildSlider() {
     // Clamp page to maxPage (excluding chapter comments page)
@@ -671,6 +714,49 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
     var filename =
         "${context.reader.widget.name}_EP${context.reader.chapter}_P${imageIndex + 1}${fileType.ext}";
     saveFile(data: data, filename: filename);
+  }
+
+  /// Set the current page as the cover of the local comic.
+  void setAsCover() async {
+    var reader = context.reader;
+    var comic = LocalManager().find(reader.cid, ComicType.local);
+    if (comic == null) {
+      return;
+    }
+    var result = await selectImageToData();
+    if (result == null) {
+      return;
+    }
+    var (_, data) = result;
+    try {
+      String coverName;
+      var coverFile = comic.coverFile;
+      if (coverFile.existsSync()) {
+        coverName = comic.cover;
+        await coverFile.writeAsBytes(data);
+      } else {
+        var ext = detectFileType(data).ext;
+        coverName = "cover$ext";
+        await File(FilePath.join(comic.baseDir, coverName)).writeAsBytes(data);
+      }
+      // Update the cover field in the database.
+      var newComic = LocalComic(
+        id: comic.id,
+        title: comic.title,
+        subtitle: comic.subtitle,
+        tags: comic.tags,
+        directory: comic.directory,
+        chapters: comic.chapters,
+        cover: coverName,
+        comicType: comic.comicType,
+        downloadedChapters: comic.downloadedChapters,
+        createdAt: comic.createdAt,
+      );
+      await LocalManager().add(newComic, comic.id);
+      showToast(context: context, message: "Cover updated".tl);
+    } catch (e) {
+      showToast(context: context, message: e.toString());
+    }
   }
 
   void share() async {
@@ -814,9 +900,9 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
             child: InkWell(
               onTap: () {
                 if (showFloatingButtonValue == 1) {
-                  context.reader.toNextChapter();
+                  context.reader.toNextChapterOrComic();
                 } else if (showFloatingButtonValue == -1) {
-                  context.reader.toPrevChapter();
+                  context.reader.toPrevChapterOrComic();
                 }
                 setFloatingButton(0);
               },
