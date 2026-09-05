@@ -1,5 +1,10 @@
 # Venera Mod
 
+<p>
+  <a href="README.md"><strong>简体中文</strong></a> |
+  <a href="README_EN.md">English</a>
+</p>
+
 > 本项目 fork 自 [venera-app/venera](https://github.com/venera-app/venera)（GPL-3.0）。原项目是一个支持阅读本地与网络漫画的阅读器，现已被作者归档停止维护。本仓库在其基础上继续开发，新增了自动滚动、手柄支持与书架管理等功能。
 
 [![License](https://img.shields.io/github/license/venera-app/venera)](https://github.com/venera-app/venera/blob/master/LICENSE)

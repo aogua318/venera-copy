@@ -1,5 +1,10 @@
 # Venera Mod
 
+<p>
+  <a href="README_ZH.md">简体中文</a> |
+  <a href="README_EN.md"><strong>English</strong></a>
+</p>
+
 > This project is a fork of [venera-app/venera](https://github.com/venera-app/venera) (GPL-3.0). The original project is a comic reader that supports reading local and network comics, and has been archived by its author. This repository continues development on top of it, adding auto scrolling, gamepad support, bookshelf management and more.
 
 [![License](https://img.shields.io/github/license/venera-app/venera)](https://github.com/venera-app/venera/blob/master/LICENSE)
