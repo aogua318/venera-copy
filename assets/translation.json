@@ -486,7 +486,9 @@
     "Select None": "全不选",
     "Merging @a/@b": "正在合并 @a/@b",
     "Do not leave this page. Large comics may take a while.": "请勿离开本页，大体积漫画可能需要较长时间。",
-    "Skipped @a existing comics": "已跳过 @a 个已存在的漫画"
+    "Skipped @a existing comics": "已跳过 @a 个已存在的漫画",
+    "Importing @a/@b": "导入中 @a/@b",
+    "Copying @a/@b": "复制中 @a/@b"
   },
   "zh_TW": {
     "Home": "首頁",
@@ -975,6 +977,8 @@
     "Select None": "全不選",
     "Merging @a/@b": "正在合併 @a/@b",
     "Do not leave this page. Large comics may take a while.": "請勿離開本頁，大體積漫畫可能需要較長時間。",
-    "Skipped @a existing comics": "已跳過 @a 個已存在的漫畫"
+    "Skipped @a existing comics": "已跳過 @a 個已存在的漫畫",
+    "Importing @a/@b": "匯入中 @a/@b",
+    "Copying @a/@b": "複製中 @a/@b"
   }
 }
