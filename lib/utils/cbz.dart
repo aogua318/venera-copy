@@ -81,7 +81,9 @@ abstract class CBZ {
     }
   }
 
-  static Future<LocalComic> import(File file) async {
+  /// Import a comic book archive. Returns null when the comic is skipped
+  /// (a comic or directory with the same name already exists).
+  static Future<LocalComic?> import(File file) async {
     var cache = Directory(FilePath.join(App.cachePath, 'cbz_import'));
     if (cache.existsSync()) cache.deleteSync(recursive: true);
     cache.createSync();
@@ -105,7 +107,16 @@ abstract class CBZ {
     );
     var old = LocalManager().findByName(metaData.title);
     if (old != null) {
-      throw Exception('Comic with name ${metaData.title} already exists');
+      // Skip existing comics instead of throwing.
+      cache.deleteSync(recursive: true);
+      return null;
+    }
+    var destName = sanitizeFileName(metaData.title);
+    var dest = Directory(FilePath.join(LocalManager().path, destName));
+    if (dest.existsSync()) {
+      // A directory with the same name already exists, skip.
+      cache.deleteSync(recursive: true);
+      return null;
     }
     var files = cache.listSync().whereType<File>().toList();
     files.removeWhere((e) {
@@ -137,9 +148,6 @@ abstract class CBZ {
       coverFile = files.first;
     }
     Map<String, String>? cpMap;
-    var dest = Directory(
-      FilePath.join(LocalManager().path, sanitizeFileName(metaData.title)),
-    );
     dest.createSync();
     coverFile.copyMem(FilePath.join(dest.path, 'cover.${coverFile.extension}'));
     if (metaData.chapters == null) {

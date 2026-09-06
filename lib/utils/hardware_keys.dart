@@ -9,7 +9,8 @@ enum InputAction {
   prevPage,
   toggleAutoScroll,
   nextChapter,
-  prevChapter;
+  prevChapter,
+  back;
 
   static InputAction? tryParse(String name) {
     for (var value in values) {
@@ -24,6 +25,7 @@ enum InputAction {
     toggleAutoScroll => "Toggle Auto Scroll",
     nextChapter => "Next Chapter",
     prevChapter => "Previous Chapter",
+    back => "Back",
   };
 }
 

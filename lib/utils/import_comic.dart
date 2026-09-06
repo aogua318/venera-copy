@@ -18,7 +18,11 @@ class ImportComic {
   final String? selectedFolder;
   final bool copyToLocal;
 
-  const ImportComic({this.selectedFolder, this.copyToLocal = true});
+  /// Number of comics skipped because a comic/folder with the same name
+  /// already exists.
+  int skippedCount = 0;
+
+  ImportComic({this.selectedFolder, this.copyToLocal = true});
 
   Future<bool> cbz() async {
     var file = await selectFile(ext: ['cbz', 'zip', '7z', 'cb7']);
@@ -29,7 +33,11 @@ class ImportComic {
     var controller = showLoadingDialog(App.rootContext, allowCancel: false);
     try {
       var comic = await CBZ.import(File(file.path));
-      imported[selectedFolder] = [comic];
+      if (comic == null) {
+        skippedCount++;
+      } else {
+        imported[selectedFolder] = [comic];
+      }
     } catch (e, s) {
       Log.error("Import Comic", e.toString(), s);
       App.rootContext.showMessage(message: e.toString());
@@ -51,7 +59,11 @@ class ImportComic {
       for (var file in files) {
         try {
           var comic = await CBZ.import(file);
-          comics.add(comic);
+          if (comic == null) {
+            skippedCount++;
+          } else {
+            comics.add(comic);
+          }
         } catch (e, s) {
           Log.error("Import Comic", e.toString(), s);
         }
@@ -116,10 +128,10 @@ class ImportComic {
                 ][(log(comic['CATEGORY'] as int) / ln2).floor()]
               ],
               createTime: downloadTime);
-          if (comicObj == null) {
+          if (comicObj.$1 == null) {
             continue;
           }
-          imported.add(comicObj);
+          imported.add(comicObj.$1!);
         }
         return imported;
       }
@@ -175,9 +187,9 @@ class ImportComic {
     try {
       if (single) {
         var result = await _checkSingleComic(path);
-        if (result != null) {
-          imported[selectedFolder]!.add(result);
-        } else {
+        if (result.$1 != null) {
+          imported[selectedFolder]!.add(result.$1!);
+        } else if (!result.$2) {
           App.rootContext.showMessage(message: "Invalid Comic".tl);
           return false;
         }
@@ -185,8 +197,8 @@ class ImportComic {
         await for (var entry in path.list()) {
           if (entry is Directory) {
             var result = await _checkSingleComic(entry);
-            if (result != null) {
-              imported[selectedFolder]!.add(result);
+            if (result.$1 != null) {
+              imported[selectedFolder]!.add(result.$1!);
             }
           }
         }
@@ -222,8 +234,8 @@ class ImportComic {
             createTime: stat.modified,
             useRelativePath: true,
           );
-          if (result != null) {
-            imported[null]!.add(result);
+          if (result.$1 != null) {
+            imported[null]!.add(result.$1!);
           }
         }
       }
@@ -239,19 +251,23 @@ class ImportComic {
     return registerComics(imported, false);
   }
 
-  //Automatically search for cover image and chapters
-  Future<LocalComic?> _checkSingleComic(Directory directory,
+  //Automatically search for cover image and chapters.
+  /// Returns (comic, alreadyExists). [comic] is null when the directory is
+  /// not a valid comic; [alreadyExists] is true when it was skipped because
+  /// a comic with the same name already exists.
+  Future<(LocalComic?, bool)> _checkSingleComic(Directory directory,
       {String? id,
       String? title,
       String? subtitle,
       List<String>? tags,
       DateTime? createTime,
       bool useRelativePath = false}) async {
-    if (!(await directory.exists())) return null;
+    if (!(await directory.exists())) return (null, false);
     var name = title ?? directory.name;
     if (LocalManager().findByName(name) != null) {
       Log.info("Import Comic", "Comic already exists: $name");
-      return null;
+      skippedCount++;
+      return (null, true);
     }
     bool hasChapters = false;
     var chapters = <String>[];
@@ -265,7 +281,7 @@ class ImportComic {
           if (file is Directory) {
             Log.info("Import Comic",
                 "Invalid Chapter: ${entry.name}\nA directory is found in the chapter directory.");
-            return null;
+            return (null, false);
           }
         }
       } else if (entry is File) {
@@ -277,7 +293,7 @@ class ImportComic {
     }
 
     if (fileList.isEmpty) {
-      return null;
+      return (null, false);
     }
 
     fileList.sort();
@@ -297,10 +313,10 @@ class ImportComic {
     }
     if (coverPath == '') {
       Log.info("Import Comic", "Invalid Comic: $name\nNo cover image found.");
-      return null;
+      return (null, false);
     }
     var directoryPath = useRelativePath ? directory.name : directory.path;
-    return LocalComic(
+    return (LocalComic(
       id: id ?? '0',
       title: name,
       subtitle: subtitle ?? '',
@@ -313,7 +329,7 @@ class ImportComic {
       comicType: ComicType.local,
       downloadedChapters: chapters,
       createdAt: createTime ?? DateTime.now(),
-    );
+    ), false);
   }
 
   static Future<Map<String, String>> _copyDirectories(
@@ -326,12 +342,10 @@ class ImportComic {
         var source = Directory(dir);
         var dest = Directory("$destination/${source.name}");
         if (dest.existsSync()) {
-          // The destination directory already exists, and it is not managed by the app.
-          // Rename the old directory to avoid conflicts.
+          // A directory with the same name already exists, skip this comic.
           Log.info("Import Comic",
-              "Directory already exists: ${source.name}\nRenaming the old directory.");
-          dest.renameSync(
-              findValidDirectoryName(dest.parent.path, "${dest.path}_old"));
+              "Directory already exists: ${source.name}\nSkipping.");
+          continue;
         }
         dest.createSync();
         await copyDirectory(source, dest);
@@ -366,12 +380,18 @@ class ImportComic {
         });
         //Construct a new object since LocalComic.directory is a final String
         for (var c in comics[favoriteFolder]!) {
+          var newPath = pathMap[c.directory];
+          if (newPath == null) {
+            // Skipped: a directory with the same name already exists.
+            skippedCount++;
+            continue;
+          }
           result[favoriteFolder]!.add(LocalComic(
             id: c.id,
             title: c.title,
             subtitle: c.subtitle,
             tags: c.tags,
-            directory: pathMap[c.directory]!,
+            directory: newPath,
             chapters: c.chapters,
             cover: c.cover,
             comicType: c.comicType,
@@ -418,6 +438,12 @@ class ImportComic {
           message: "Imported @a comics".tlParams({
         'a': importedCount,
       }));
+      if (skippedCount > 0) {
+        App.rootContext.showMessage(
+            message: "Skipped @a existing comics".tlParams({
+          'a': skippedCount,
+        }));
+      }
     } catch (e, s) {
       App.rootContext.showMessage(message: "Failed to register comics".tl);
       Log.error("Import Comic", e.toString(), s);

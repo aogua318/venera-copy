@@ -397,6 +397,10 @@ class _ReaderState extends State<Reader>
         toNextChapterOrComic();
       case InputAction.prevChapter:
         toPrevChapterOrComic();
+      case InputAction.back:
+        if (App.rootContext.canPop()) {
+          App.rootContext.pop();
+        }
     }
   }
 

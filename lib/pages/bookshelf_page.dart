@@ -190,10 +190,15 @@ class _BookshelfPageState extends State<BookshelfPage> {
       entries.add((entry, comic));
     }
     if (viewMode == 'list') {
-      // The classic comic tile grid.
+      // Row cards with covers scaled to fill the row height.
       var children = <Widget>[];
       for (var (entry, comic) in entries) {
-        children.add(buildItem(entry, comic, viewMode));
+        children.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: buildItem(entry, comic, viewMode),
+          ),
+        );
       }
       return GridView(
         controller: _scrollController,
@@ -247,8 +252,18 @@ class _BookshelfPageState extends State<BookshelfPage> {
         onTap: () => onItemTap(entry, comic),
         onLongPressed: () => enterSelectionMode(entry),
       );
+    } else if (viewMode == 'list') {
+      // Row card: the cover scales to fill the row height, keeping its
+      // natural aspect ratio.
+      var scale = (appdata.settings['comicTileScale'] as num).toDouble();
+      var height = 152 * scale - 24;
+      child = _BookshelfListTile(
+        comic: comic,
+        height: height,
+        onTap: () => onItemTap(entry, comic),
+        onLongPressed: () => enterSelectionMode(entry),
+      );
     } else {
-      // The classic comic tile.
       child = ComicTile(
         comic: comic,
         onTap: () => onItemTap(entry, comic),
@@ -499,6 +514,18 @@ class _BookshelfPageState extends State<BookshelfPage> {
   }
 }
 
+/// Aspect ratio cache for comic covers, keyed by "sourceKey@id".
+final Map<String, double> _coverAspectCache = {};
+
+ImageProvider? _coverProvider(dynamic comic) {
+  if (comic is LocalComic) {
+    return LocalComicImageProvider(comic);
+  } else if (comic is History) {
+    return HistoryImageProvider(comic);
+  }
+  return null;
+}
+
 /// A comic tile for the waterfall view. The height follows the natural
 /// aspect ratio of the cover image.
 class _WaterfallTile extends StatefulWidget {
@@ -524,8 +551,6 @@ class _WaterfallTile extends StatefulWidget {
 }
 
 class _WaterfallTileState extends State<_WaterfallTile> {
-  static final _aspectCache = <String, double>{};
-
   static const _defaultAspect = 0.7;
 
   ImageProvider? _provider;
@@ -540,17 +565,12 @@ class _WaterfallTileState extends State<_WaterfallTile> {
   @override
   void initState() {
     super.initState();
-    var comic = widget.comic;
-    if (comic is LocalComic) {
-      _provider = LocalComicImageProvider(comic);
-    } else if (comic is History) {
-      _provider = HistoryImageProvider(comic);
-    }
+    _provider = _coverProvider(widget.comic);
     if (widget.fixedAspect != null) {
       _aspect = widget.fixedAspect!;
       return;
     }
-    var cached = _aspectCache[_cacheKey];
+    var cached = _coverAspectCache[_cacheKey];
     if (cached != null) {
       _aspect = cached;
     }
@@ -566,7 +586,7 @@ class _WaterfallTileState extends State<_WaterfallTile> {
     var provider = _provider;
     if (widget.fixedAspect != null ||
         provider == null ||
-        _aspectCache.containsKey(_cacheKey)) {
+        _coverAspectCache.containsKey(_cacheKey)) {
       return;
     }
     _stream?.removeListener(_listener!);
@@ -574,7 +594,7 @@ class _WaterfallTileState extends State<_WaterfallTile> {
     late final ImageStreamListener listener;
     listener = ImageStreamListener((info, _) {
       var aspect = info.image.width / info.image.height;
-      _aspectCache[_cacheKey] = aspect;
+      _coverAspectCache[_cacheKey] = aspect;
       if (mounted) {
         setState(() {
           _aspect = aspect;
@@ -628,6 +648,141 @@ class _WaterfallTileState extends State<_WaterfallTile> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: ts.s12,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A row card for the list view. The cover keeps its natural aspect ratio
+/// and scales to fill the row height.
+class _BookshelfListTile extends StatefulWidget {
+  const _BookshelfListTile({
+    required this.comic,
+    required this.height,
+    required this.onTap,
+    required this.onLongPressed,
+  });
+
+  final dynamic comic;
+
+  final double height;
+
+  final VoidCallback onTap;
+
+  final VoidCallback onLongPressed;
+
+  @override
+  State<_BookshelfListTile> createState() => _BookshelfListTileState();
+}
+
+class _BookshelfListTileState extends State<_BookshelfListTile> {
+  ImageProvider? _provider;
+
+  double _aspect = 0.72;
+
+  ImageStream? _stream;
+  ImageStreamListener? _listener;
+
+  String get _cacheKey => "${widget.comic.sourceKey}@${widget.comic.id}";
+
+  @override
+  void initState() {
+    super.initState();
+    _provider = _coverProvider(widget.comic);
+    var cached = _coverAspectCache[_cacheKey];
+    if (cached != null) {
+      _aspect = cached;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _resolveAspectRatio();
+  }
+
+  void _resolveAspectRatio() {
+    var provider = _provider;
+    if (provider == null || _coverAspectCache.containsKey(_cacheKey)) {
+      return;
+    }
+    _stream?.removeListener(_listener!);
+    var stream = provider.resolve(createLocalImageConfiguration(context));
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener((info, _) {
+      var aspect = info.image.width / info.image.height;
+      _coverAspectCache[_cacheKey] = aspect;
+      if (mounted) {
+        setState(() {
+          _aspect = aspect;
+        });
+      }
+      stream.removeListener(listener);
+    }, onError: (_, __) {});
+    _listener = listener;
+    _stream = stream;
+    stream.addListener(listener);
+  }
+
+  @override
+  void dispose() {
+    if (_stream != null && _listener != null) {
+      _stream!.removeListener(_listener!);
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var subtitle = widget.comic.subtitle?.toString() ?? '';
+    return InkWell(
+      onTap: widget.onTap,
+      onLongPress: widget.onLongPressed,
+      borderRadius: BorderRadius.circular(8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: _provider == null
+                ? Container(
+                    width: 36,
+                    height: widget.height,
+                    color: context.colorScheme.secondaryContainer,
+                  )
+                : SizedBox(
+                    height: widget.height,
+                    width: (widget.height * _aspect).clamp(36.0, 280.0),
+                    child: Image(
+                      image: _provider!,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.medium,
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.comic.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: ts.s14,
+                ),
+                if (subtitle.isNotEmpty)
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ts.s12
+                        .copyWith(color: context.colorScheme.outline),
+                  ).paddingTop(4),
+              ],
+            ),
           ),
         ],
       ),

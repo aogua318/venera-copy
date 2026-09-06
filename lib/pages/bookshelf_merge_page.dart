@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_reorderable_grid_view/widgets/reorderable_builder.dart';
 import 'package:venera/components/components.dart';
@@ -24,6 +25,10 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
   late List<LocalComic> comics;
 
   bool merging = false;
+
+  int progressDone = 0;
+
+  int progressTotal = 0;
 
   final _scrollController = ScrollController();
 
@@ -59,45 +64,70 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
           ).paddingRight(8),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              "Drag to adjust the merge order. The first comic's folder name is used for the merged comic. The source comics will be deleted after merging."
-                  .tl,
-              style: TextStyle(color: context.colorScheme.outline),
+      body: merging
+          ? Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  "Merging @a/@b".tlParams({
+                    'a': progressDone,
+                    'b': progressTotal,
+                  }),
+                  style: ts.s16,
+                ),
+                const SizedBox(height: 16),
+                LinearProgressIndicator(
+                  value: progressTotal == 0 ? null : progressDone / progressTotal,
+                ).fixWidth(240),
+                const SizedBox(height: 16),
+                Text(
+                  "Do not leave this page. Large comics may take a while."
+                      .tl,
+                  style: TextStyle(color: context.colorScheme.outline),
+                ),
+              ],
+            )
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    "Drag to adjust the merge order. The first comic's folder name is used for the merged comic. The source comics will be deleted after merging."
+                        .tl,
+                    style: TextStyle(color: context.colorScheme.outline),
+                  ),
+                ),
+                Expanded(
+                  child: ReorderableBuilder<LocalComic>(
+                    scrollController: _scrollController,
+                    longPressDelay: App.isDesktop
+                        ? const Duration(milliseconds: 100)
+                        : const Duration(milliseconds: 500),
+                    onReorder: (reorderFunc) {
+                      setState(() {
+                        comics = reorderFunc(comics);
+                      });
+                    },
+                    builder: (children) {
+                      return GridView(
+                        controller: _scrollController,
+                        gridDelegate: SliverGridDelegateWithComics(),
+                        children: children,
+                      );
+                    },
+                    children: tiles,
+                  ),
+                ),
+              ],
             ),
-          ),
-          Expanded(
-            child: ReorderableBuilder<LocalComic>(
-              scrollController: _scrollController,
-              longPressDelay: App.isDesktop
-                  ? const Duration(milliseconds: 100)
-                  : const Duration(milliseconds: 500),
-              onReorder: (reorderFunc) {
-                setState(() {
-                  comics = reorderFunc(comics);
-                });
-              },
-              builder: (children) {
-                return GridView(
-                  controller: _scrollController,
-                  gridDelegate: SliverGridDelegateWithComics(),
-                  children: children,
-                );
-              },
-              children: tiles,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
   Future<void> merge() async {
     setState(() {
       merging = true;
+      progressDone = 0;
+      progressTotal = 0;
     });
     try {
       var merged = await _mergeComics(comics);
@@ -113,6 +143,22 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
         });
       }
     }
+  }
+
+  /// One chapter's page files: pairs of [sourcePath, destinationPath].
+  /// Runs in an isolate so heavy file IO does not block the UI thread.
+  static Future<void> _moveChapterFiles(List<List<String>> pairs) async {
+    await overrideIO(() async {
+      for (var pair in pairs) {
+        var src = File(pair[0]);
+        var dst = File(pair[1]);
+        try {
+          src.renameSync(dst.path);
+        } catch (_) {
+          await src.copyMem(dst.path);
+        }
+      }
+    });
   }
 
   Future<LocalComic> _mergeComics(List<LocalComic> sources) async {
@@ -140,8 +186,8 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
       coverName = "";
     }
 
-    var chapters = <String, String>{};
-    int chapterIndex = 0;
+    // Build the chapter plan on the main thread (directory listing only).
+    var plan = <(String, List<String>)>[]; // (title, source file paths)
     for (var source in sources) {
       var sourceChapters = <(String, Directory)>[]; // (title, directory)
       if (source.hasChapters) {
@@ -171,26 +217,34 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
           return a.name.compareTo(b.name);
         });
         if (files.isEmpty) continue;
-        var chapterDirName = chapterIndex.toString();
-        var chapterDir = Directory(FilePath.join(dest.path, chapterDirName));
-        chapterDir.createSync();
-        for (var i = 0; i < files.length; i++) {
-          var src = files[i];
-          var dst = File(
-              FilePath.join(chapterDir.path, '${i + 1}.${src.extension}'));
-          try {
-            src.renameSync(dst.path);
-          } catch (_) {
-            await src.copyMem(dst.path);
-          }
-        }
-        chapters[chapterIndex.toString()] = title;
-        chapterIndex++;
+        plan.add((title, files.map((e) => e.path).toList()));
       }
     }
-    if (chapters.isEmpty) {
+    if (plan.isEmpty) {
       dest.deleteSync(recursive: true);
       throw Exception("No pages found in the selected comics");
+    }
+
+    // Move the page files chapter by chapter in isolates, reporting progress.
+    var chapters = <String, String>{};
+    progressTotal = plan.length;
+    if (mounted) setState(() {});
+    int chapterIndex = 0;
+    for (var (title, files) in plan) {
+      var chapterDir = Directory(FilePath.join(dest.path, "$chapterIndex"));
+      chapterDir.createSync();
+      var pairs = <List<String>>[
+        for (var i = 0; i < files.length; i++)
+          [
+            files[i],
+            FilePath.join(chapterDir.path, '${i + 1}.${files[i].split('.').last}'),
+          ]
+      ];
+      await compute(_moveChapterFiles, pairs);
+      chapters[chapterIndex.toString()] = title;
+      chapterIndex++;
+      progressDone = chapterIndex;
+      if (mounted) setState(() {});
     }
 
     var comic = LocalComic(
