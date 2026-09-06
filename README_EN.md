@@ -33,6 +33,7 @@
 ### Bookshelf Management
 
 - **Standalone bookshelf**: a bookshelf page has been added to the navigation pane, reusing the local comic import flow from the home page (with import progress bars and automatic skipping of existing comics); imported comics are added to the shelf automatically
+- **Structured import**: the nesting of archives / directories is detected automatically — single-chain nesting is flattened into a single-chapter comic, and branching structures are recognized as multi-chapter comics (chapters sorted by folder name); the directory layout matches the merge result
 - **Multiple sort modes**: added time / name / last read time, with ascending and descending order; sort settings are persisted
 - **Three view modes**: list (the original card view) / grid (uniform size + file name) / waterfall (by the real aspect ratio of each cover)
 - **Multi-select operations**: long press to enter selection mode, with select all / invert selection / select none, removal from the shelf, and deletion (local comics are also removed from disk, with progress)

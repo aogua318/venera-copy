@@ -1024,3 +1024,37 @@ maven { url 'https://maven.aliyun.com/nexus/content/groups/public' }
 | 1.6.3+163 | Iterations 1–4 feature set; first GitHub Release (4 APKs + Windows zip) |
 | 1.6.4+164 / 1.6.5+165 | Iteration 5 fixes (internal builds) |
 | 1.7.0+170 | Full iteration 5–6 content, official release |
+
+---
+
+## 12. Follow-up Iteration (v1.7.2): Structured Import and Merge Naming Fix
+
+> Corresponds to chapter 15 of the development document.
+
+### 12.1 New File
+
+| File | Notes |
+|---|---|
+| `lib/utils/comic_structure.dart` | Comic directory structure analysis: single-chain descent, branch detection, recursive image collection, natural sorting |
+
+### 12.2 Structured Import
+
+- Archive import (`CBZ.import`) and directory import (`_checkSingleComic`) share `analyzeComicStructure`: descend single chains to the content root; a content root with ≥2 subdirectories is a multi-chapter comic, otherwise single-chapter.
+- The multi-chapter import format matches the merge result: comic name directory on the first level, `0,1,2...` chapter directories on the second, chapter titles = original folder names (natural order); archive pages are **moved** from the extraction cache.
+- Directory import no longer rejects comics whose chapter directories contain subdirectories; the comic `directory` points to the descended content root.
+- metadata.json chapter definitions (start/end splits) remain supported.
+
+### 12.3 Recursive Local Reading
+
+`LocalManager.getImages` now collects page files recursively (excluding `cover.*` and hidden files) with natural sorting. Comics in the old format behave unchanged.
+
+### 12.4 Merge Naming Fix
+
+When the first comic's `directory` is an absolute path (imported without copying), only its last segment is used as the merged comic's name prefix, fixing the "full path + comic name" issue.
+
+### 12.5 Other Changes in the Same Version
+
+- Auto scroll speed setting: slider + tappable manual input (`_AutoScrollSpeedSetting`, input range 100–600000 ms, slider range 1000–60000)
+- Bookshelf view mode dialog closes automatically after selection
+- Screen stays on during long operations (import / merge / deletion) via the new shared `setScreenOn` helper in `utils/io.dart`
+- Local delete dialog order fix (close the confirm dialog before showing the progress dialog)

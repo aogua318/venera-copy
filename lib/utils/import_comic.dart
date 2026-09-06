@@ -7,8 +7,10 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/local.dart';
+import 'package:collection/collection.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:sqlite3/sqlite3.dart' as sql;
+import 'package:venera/utils/comic_structure.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/translations.dart';
 import 'cbz.dart';
@@ -178,7 +180,8 @@ class ImportComic {
               ORDER BY DL.TIME DESC
             """).toList();
 
-        var validComics = await validateComics(comicList);        imported[folderName] = validComics;
+        var validComics = await validateComics(comicList);
+        imported[folderName] = validComics;
         if (validComics.isNotEmpty &&
             !LocalFavoritesManager().existsFolder(folderName)) {
           LocalFavoritesManager().createFolder(folderName);
@@ -316,65 +319,71 @@ class ImportComic {
       skippedCount++;
       return (null, true);
     }
-    bool hasChapters = false;
-    var chapters = <String>[];
-    var coverPath = ''; // relative path to the cover image
-    var fileList = <String>[];
-    await for (var entry in directory.list()) {
-      if (entry is Directory) {
-        hasChapters = true;
-        chapters.add(entry.name);
-        await for (var file in entry.list()) {
-          if (file is Directory) {
-            Log.info("Import Comic",
-                "Invalid Chapter: ${entry.name}\nA directory is found in the chapter directory.");
-            return (null, false);
-          }
-        }
-      } else if (entry is File) {
-        const imageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe'];
-        if (imageExtensions.contains(entry.extension)) {
-          fileList.add(entry.name);
-        }
+    var (contentRoot, isMultiChapter) = analyzeComicStructure(directory);
+
+    String relative(String path) => pathRelativeTo(path, contentRoot.path);
+
+    var chapters = <String, String>{};
+    var downloaded = <String>[];
+    File? coverFile;
+
+    if (isMultiChapter) {
+      // Branching structure: each subdirectory becomes a chapter.
+      var subdirs = contentRoot
+          .listSync()
+          .whereType<Directory>()
+          .where((e) => !e.name.startsWith('.'))
+          .toList()
+        ..sort((a, b) => naturalCompare(a.path, b.path));
+      for (var subdir in subdirs) {
+        var pages = collectComicImages(subdir);
+        if (pages.isEmpty) continue;
+        chapters[subdir.name] = subdir.name;
+        downloaded.add(subdir.name);
+        coverFile ??= pages.firstWhereOrNull(
+                (f) => f.name.startsWith('cover')) ??
+            pages.first;
       }
-    }
-
-    if (fileList.isEmpty) {
-      return (null, false);
-    }
-
-    fileList.sort();
-    coverPath = fileList.firstWhereOrNull((l) => l.startsWith('cover')) ??
-        fileList.first;
-
-    chapters.sort();
-    if (hasChapters && coverPath == '') {
-      // use the first image in the first chapter as the cover
-      var firstChapter = Directory('${directory.path}/${chapters.first}');
-      await for (var entry in firstChapter.list()) {
-        if (entry is File) {
-          coverPath = entry.name;
-          break;
-        }
+      // A file named 'cover.*' directly under the content root is preferred.
+      coverFile = contentRoot
+              .listSync()
+              .whereType<File>()
+              .firstWhereOrNull((f) =>
+                  f.name.startsWith('cover') && !f.name.startsWith('.')) ??
+          coverFile;
+      if (chapters.isEmpty) {
+        Log.info("Import Comic", "Invalid Comic: $name\nNo pages found.");
+        return (null, false);
       }
+    } else {
+      // Single-chapter comic (nested single branches are flattened; pages
+      // are collected recursively).
+      var pages = collectComicImages(contentRoot);
+      if (pages.isEmpty) {
+        Log.info("Import Comic", "Invalid Comic: $name\nNo cover image found.");
+        return (null, false);
+      }
+      coverFile = contentRoot
+              .listSync()
+              .whereType<File>()
+              .firstWhereOrNull((f) =>
+                  f.name.startsWith('cover') && !f.name.startsWith('.')) ??
+          pages.firstWhereOrNull((f) => f.name.startsWith('cover')) ??
+          pages.first;
     }
-    if (coverPath == '') {
-      Log.info("Import Comic", "Invalid Comic: $name\nNo cover image found.");
-      return (null, false);
-    }
-    var directoryPath = useRelativePath ? directory.name : directory.path;
+    var coverPath = coverFile == null ? '' : relative(coverFile.path);
+
+    var directoryPath = useRelativePath ? contentRoot.name : contentRoot.path;
     return (LocalComic(
       id: id ?? '0',
       title: name,
       subtitle: subtitle ?? '',
       tags: tags ?? [],
       directory: directoryPath,
-      chapters: hasChapters
-          ? ComicChapters(Map.fromIterables(chapters, chapters))
-          : null,
+      chapters: isMultiChapter ? ComicChapters(chapters) : null,
       cover: coverPath,
       comicType: ComicType.local,
-      downloadedChapters: chapters,
+      downloadedChapters: downloaded,
       createdAt: createTime ?? DateTime.now(),
     ), false);
   }

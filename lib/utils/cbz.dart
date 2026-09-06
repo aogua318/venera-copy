@@ -4,6 +4,7 @@ import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
+import 'package:venera/utils/comic_structure.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/file_type.dart';
 import 'package:venera/utils/io.dart';
@@ -123,59 +124,109 @@ abstract class CBZ {
       var ext = e.path.split('.').last;
       return !['jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe'].contains(ext);
     });
-    if (files.isEmpty) {
+    var (contentRoot, isMultiChapter) = analyzeComicStructure(cache);
+
+    // Build the chapter list from the archive structure (or metadata).
+    var chapterList = <(String, List<File>)>[];
+    if (metaData.chapters != null) {
+      // Legacy metadata-defined chapters over the flattened page list.
+      var pages = collectComicImages(contentRoot);
+      for (var chapter in metaData.chapters!) {
+        var start = (chapter.start - 1).clamp(0, pages.length);
+        var end = chapter.end.clamp(0, pages.length);
+        if (end > start) {
+          chapterList.add((chapter.title, pages.sublist(start, end)));
+        }
+      }
+    } else if (isMultiChapter) {
+      // Branching structure: each subdirectory becomes a chapter. Page files
+      // directly under the content root become an extra leading chapter.
+      var rootImages = files
+          .where((e) => !e.name.startsWith('cover.'))
+          .toList()
+        ..sort((a, b) => naturalCompare(a.path, b.path));
+      if (rootImages.isNotEmpty) {
+        chapterList.add((metaData.title, rootImages));
+      }
+      var subdirs = contentRoot
+          .listSync()
+          .whereType<Directory>()
+          .where((e) => !e.name.startsWith('.'))
+          .toList()
+        ..sort((a, b) => naturalCompare(a.path, b.path));
+      for (var subdir in subdirs) {
+        var pages = collectComicImages(subdir);
+        if (pages.isNotEmpty) {
+          chapterList.add((subdir.name, pages));
+        }
+      }
+    } else {
+      // Single-chapter comic (nested single branches are flattened).
+      chapterList.add((metaData.title, collectComicImages(contentRoot)));
+    }
+    if (chapterList.every((c) => c.$2.isEmpty)) {
       cache.deleteSync(recursive: true);
       throw Exception('No images found in the archive');
     }
-    files.sort((a, b) {
-      var aName = a.basenameWithoutExt;
-      var bName = b.basenameWithoutExt;
-      var aIndex = int.tryParse(aName);
-      var bIndex = int.tryParse(bName);
-      if (aIndex != null && bIndex != null) {
-        return aIndex.compareTo(bIndex);
-      } else {
-        return a.path.compareTo(b.path);
+
+    // Cover: a file named 'cover.*' anywhere, otherwise the first page of
+    // the first chapter. The cover is excluded from the pages.
+    File? coverFile;
+    for (var (_, pages) in chapterList) {
+      coverFile = pages.firstWhereOrNull((e) => e.name.startsWith('cover.'));
+      if (coverFile != null) {
+        pages.remove(coverFile);
+        break;
       }
-    });
-    var coverFile = files.firstWhereOrNull(
-      (element) =>
-          element.path.endsWith('cover.${element.path.split('.').last}'),
-    );
-    if (coverFile != null) {
-      files.remove(coverFile);
-    } else {
-      coverFile = files.first;
     }
-    Map<String, String>? cpMap;
+    coverFile ??= () {
+      for (var (_, pages) in chapterList) {
+        if (pages.isNotEmpty) {
+          return pages.removeAt(0);
+        }
+      }
+      return null;
+    }();
+    if (coverFile == null) {
+      cache.deleteSync(recursive: true);
+      throw Exception('No images found in the archive');
+    }
+
     dest.createSync();
     coverFile.copyMem(FilePath.join(dest.path, 'cover.${coverFile.extension}'));
-    if (metaData.chapters == null) {
-      for (var i = 0; i < files.length; i++) {
-        var src = files[i];
-        var dst = File(
-            FilePath.join(dest.path, '${i + 1}.${src.path.split('.').last}'));
-        await src.copyMem(dst.path);
+    var useChapters = metaData.chapters != null || isMultiChapter;
+    var chapterMap = <String, String>{};
+    int chapterIndex = 0;
+    for (var (title, pages) in chapterList) {
+      if (pages.isEmpty) continue;
+      if (!useChapters) {
+        // Single-chapter comic: pages go directly into the comic directory.
+        for (var i = 0; i < pages.length; i++) {
+          var src = pages[i];
+          var dst =
+              File(FilePath.join(dest.path, '${i + 1}.${src.extension}'));
+          try {
+            src.renameSync(dst.path);
+          } catch (_) {
+            await src.copyMem(dst.path);
+          }
+        }
+        break;
       }
-    } else {
-      dest.createSync();
-      var chapters = <String, List<File>>{};
-      for (var chapter in metaData.chapters!) {
-        chapters[chapter.title] = files.sublist(chapter.start - 1, chapter.end);
-      }
-      int i = 0;
-      cpMap = <String, String>{};
-      for (var chapter in chapters.entries) {
-        cpMap[i.toString()] = chapter.key;
-        var chapterDir = Directory(FilePath.join(dest.path, i.toString()));
-        chapterDir.createSync();
-        for (var i = 0; i < chapter.value.length; i++) {
-          var src = chapter.value[i];
-          var dst = File(FilePath.join(
-              chapterDir.path, '${i + 1}.${src.path.split('.').last}'));
+      var chapterDir = Directory(FilePath.join(dest.path, '$chapterIndex'));
+      chapterDir.createSync();
+      for (var i = 0; i < pages.length; i++) {
+        var src = pages[i];
+        var dst =
+            File(FilePath.join(chapterDir.path, '${i + 1}.${src.extension}'));
+        try {
+          src.renameSync(dst.path);
+        } catch (_) {
           await src.copyMem(dst.path);
         }
       }
+      chapterMap[chapterIndex.toString()] = title;
+      chapterIndex++;
     }
     var comic = LocalComic(
       id: LocalManager().findValidId(ComicType.local),
@@ -184,8 +235,8 @@ abstract class CBZ {
       tags: metaData.tags,
       comicType: ComicType.local,
       directory: dest.name,
-      chapters: ComicChapters.fromJsonOrNull(cpMap),
-      downloadedChapters: cpMap?.keys.toList() ?? [],
+      chapters: chapterMap.isEmpty ? null : ComicChapters(chapterMap),
+      downloadedChapters: chapterMap.keys.toList(),
       cover: 'cover.${coverFile.extension}',
       createdAt: DateTime.now(),
     );

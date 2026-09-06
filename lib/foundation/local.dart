@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart' show ChangeNotifier;
-import 'package:flutter_saf/flutter_saf.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
@@ -9,6 +8,7 @@ import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/download.dart';
+import 'package:venera/utils/comic_structure.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/io.dart';
 
@@ -426,29 +426,32 @@ class LocalManager with ChangeNotifier {
       directory = Directory(FilePath.join(directory.path, cid));
     }
     var files = <File>[];
+    await _collectImagesRecursive(directory, files);
+    sortComicFiles(files);
+    return files.map((e) => "file://${e.path}").toList();
+  }
+
+  /// Recursively collects comic page files. Nested single-branch structures
+  /// created by structured imports are flattened into the page list.
+  static Future<void> _collectImagesRecursive(
+      Directory directory, List<File> files) async {
     await for (var entity in directory.list()) {
       if (entity is File) {
-        // Do not exclude comic.cover, since it may be the first page of the chapter.
         // A file with name starting with 'cover.' is not a comic page.
         if (entity.name.startsWith('cover.')) {
           continue;
         }
-        //Hidden file in some file system
+        // Hidden file in some file systems
         if (entity.name.startsWith('.')) {
           continue;
         }
         files.add(entity);
+      } else if (entity is Directory) {
+        if (!entity.name.startsWith('.')) {
+          await _collectImagesRecursive(entity, files);
+        }
       }
     }
-    files.sort((a, b) {
-      var ai = int.tryParse(a.name.split('.').first);
-      var bi = int.tryParse(b.name.split('.').first);
-      if (ai != null && bi != null) {
-        return ai.compareTo(bi);
-      }
-      return a.name.compareTo(b.name);
-    });
-    return files.map((e) => "file://${e.path}").toList();
   }
 
   bool isDownloaded(String id, ComicType type,

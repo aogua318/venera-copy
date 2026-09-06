@@ -170,8 +170,15 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
 
   Future<LocalComic> _mergeComics(List<LocalComic> sources) async {
     var first = sources.first;
+    // The directory may be a full path (comics imported without copying);
+    // only its last segment is used for the merged comic's name.
+    var firstDirName = first.directory;
+    var sep = String.fromCharCode(92);
+    if (firstDirName.contains('/') || firstDirName.contains(sep)) {
+      firstDirName = firstDirName.replaceAll(sep, '/').split('/').last;
+    }
     var dirName = sanitizeFileName(
-      "${first.directory}_${sources.length}_Merge",
+      "${firstDirName}_${sources.length}_Merge",
       maxLength: 120,
     );
     var dest = Directory(FilePath.join(LocalManager().path, dirName));
