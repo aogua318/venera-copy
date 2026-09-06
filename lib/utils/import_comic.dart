@@ -24,7 +24,9 @@ class ImportComic {
 
   ImportComic({this.selectedFolder, this.copyToLocal = true});
 
-  Future<bool> cbz() async {
+  Future<bool> cbz() => _withKeepScreenOn(() => _cbz());
+
+  Future<bool> _cbz() async {
     var file = await selectFile(ext: ['cbz', 'zip', '7z', 'cb7']);
     Map<String?, List<LocalComic>> imported = {};
     if (file == null) {
@@ -46,7 +48,9 @@ class ImportComic {
     return registerComics(imported, false);
   }
 
-  Future<bool> multipleCbz() async {
+  Future<bool> multipleCbz() => _withKeepScreenOn(() => _multipleCbz());
+
+  Future<bool> _multipleCbz() async {
     var picker = DirectoryPicker();
     var dir = await picker.pickDirectory(directAccess: true);
     if (dir != null) {
@@ -86,7 +90,9 @@ class ImportComic {
     return false;
   }
 
-  Future<bool> ehViewer() async {
+  Future<bool> ehViewer() => _withKeepScreenOn(() => _ehViewer());
+
+  Future<bool> _ehViewer() async {
     var dbFile = await selectFile(ext: ['db']);
     final picker = DirectoryPicker();
     final comicSrc = await picker.pickDirectory();
@@ -192,7 +198,10 @@ class ImportComic {
     return registerComics(imported, copyToLocal);
   }
 
-  Future<bool> directory(bool single) async {
+  Future<bool> directory(bool single) =>
+      _withKeepScreenOn(() => _directory(single));
+
+  Future<bool> _directory(bool single) async {
     final picker = DirectoryPicker();
     final path = await picker.pickDirectory();
     if (path == null) {
@@ -234,7 +243,10 @@ class ImportComic {
     return registerComics(imported, copyToLocal);
   }
 
-  Future<bool> localDownloads() async {
+  Future<bool> localDownloads() =>
+      _withKeepScreenOn(() => _localDownloads());
+
+  Future<bool> _localDownloads() async {
     var localDir = LocalManager().directory;
     Map<String?, List<LocalComic>> imported = {null: []};
     bool cancelled = false;
@@ -509,5 +521,14 @@ class ImportComic {
     }
     copyController?.close();
     return true;
+  }
+
+  Future<bool> _withKeepScreenOn(Future<bool> Function() body) async {
+    setScreenOn(true);
+    try {
+      return await body();
+    } finally {
+      setScreenOn(false);
+    }
   }
 }

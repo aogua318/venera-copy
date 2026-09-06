@@ -133,6 +133,7 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
       progressDone = 0;
       progressTotal = 0;
     });
+    setScreenOn(true);
     try {
       var merged = await _mergeComics(comics);
       if (mounted) {
@@ -146,6 +147,8 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
           merging = false;
         });
       }
+    } finally {
+      setScreenOn(false);
     }
   }
 

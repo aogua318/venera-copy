@@ -61,6 +61,10 @@
 | `venera-<版本>.apk` | 通用版 |
 | `venera-mod-windows-x64.zip` | Windows（解压后运行 venera.exe） |
 
+## 更新日志
+
+各版本的修复与新增内容见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 从源码构建
 
 1. 克隆本仓库

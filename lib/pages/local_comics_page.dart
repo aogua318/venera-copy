@@ -442,6 +442,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                     message: "Deleting comics".tl,
                   );
                   var startedAt = DateTime.now();
+                  setScreenOn(true);
                   try {
                     await LocalManager().batchDeleteComics(
                       comics,
@@ -465,6 +466,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                       await Future.delayed(minDuration - elapsed);
                     }
                     controller.close();
+                    setScreenOn(false);
                   }
                   if (removeComicFile) {
                     // Verify the directories are actually gone.

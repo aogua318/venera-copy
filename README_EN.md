@@ -61,6 +61,10 @@ Get the latest build from the [Releases](https://github.com/aogua318/venera-copy
 | `venera-<version>.apk` | Universal |
 | `venera-mod-windows-x64.zip` | Windows (run venera.exe after extracting) |
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+
 ## Build from Source
 
 1. Clone this repository

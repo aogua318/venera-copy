@@ -14,6 +14,16 @@ import 'package:venera/utils/file_type.dart';
 export 'dart:io';
 export 'dart:typed_data';
 
+const _screenOnChannel = MethodChannel("venera/method_channel");
+
+/// Keeps the screen on while long operations (import, merge, deletion,
+/// auto play) run, so the system timeout does not interrupt them.
+void setScreenOn(bool on) {
+  if (App.isAndroid) {
+    _screenOnChannel.invokeMethod("setScreenOn", {"set": on});
+  }
+}
+
 class IO {
   /// A global flag used to indicate whether the app is selecting files.
   ///

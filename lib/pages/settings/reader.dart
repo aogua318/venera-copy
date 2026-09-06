@@ -319,12 +319,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
         ),
         SliverAnimatedVisibility(
           visible: appdata.settings['readerMode']!.startsWith('continuous'),
-          child: _SliderSetting(
-            title: "Auto scroll time per screen (ms)".tl,
-            settingsIndex: "autoScrollMsPerScreen",
-            interval: 500,
-            min: 1000,
-            max: 60000,
+          child: _AutoScrollSpeedSetting(
             onChanged: () {
               widget.onChanged?.call("autoScrollMsPerScreen");
             },
@@ -514,6 +509,128 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Auto scroll speed setting: a slider plus a tappable value that opens a
+/// numeric input dialog (supports values beyond the slider range).
+class _AutoScrollSpeedSetting extends StatefulWidget {
+  const _AutoScrollSpeedSetting({
+    this.comicId,
+    this.comicSource,
+    required this.useDeviceSettings,
+    this.onChanged,
+  });
+
+  final String? comicId;
+
+  final String? comicSource;
+
+  final bool useDeviceSettings;
+
+  final VoidCallback? onChanged;
+
+  @override
+  State<_AutoScrollSpeedSetting> createState() =>
+      _AutoScrollSpeedSettingState();
+}
+
+class _AutoScrollSpeedSettingState extends State<_AutoScrollSpeedSetting> {
+  static const _sliderMin = 1000.0;
+
+  static const _sliderMax = 60000.0;
+
+  static const _inputMin = 100;
+
+  static const _inputMax = 600000;
+
+  int get _value {
+    int v;
+    if (widget.comicId != null) {
+      v = appdata.settings.getReaderSetting(
+          widget.comicId!, widget.comicSource!, 'autoScrollMsPerScreen');
+    } else if (widget.useDeviceSettings) {
+      v = appdata.settings.getDeviceReaderSetting('autoScrollMsPerScreen');
+    } else {
+      v = appdata.settings['autoScrollMsPerScreen'];
+    }
+    return v;
+  }
+
+  void _set(int v) {
+    if (widget.comicId != null) {
+      appdata.settings.setReaderSetting(
+          widget.comicId!, widget.comicSource!, 'autoScrollMsPerScreen', v);
+    } else if (widget.useDeviceSettings) {
+      appdata.settings.setDeviceReaderSetting('autoScrollMsPerScreen', v);
+    } else {
+      appdata.settings['autoScrollMsPerScreen'] = v;
+    }
+    appdata.saveData();
+    widget.onChanged?.call();
+    setState(() {});
+  }
+
+  void _edit() {
+    var textController = TextEditingController(text: _value.toString());
+    showDialog(
+      context: context,
+      builder: (context) {
+        return ContentDialog(
+          title: "Auto scroll time per screen (ms)".tl,
+          content: TextField(
+            controller: textController,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            autofocus: true,
+          ),
+          actions: [
+            Button.text(
+              onPressed: () => context.pop(),
+              child: Text("Cancel".tl),
+            ),
+            Button.filled(
+              onPressed: () {
+                var v = int.tryParse(textController.text);
+                if (v != null) {
+                  _set(v.clamp(_inputMin, _inputMax));
+                  context.pop();
+                }
+              },
+              child: Text("Confirm".tl),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var sliderValue = _value.toDouble().clamp(_sliderMin, _sliderMax);
+    return ListTile(
+      title: Text("Auto scroll time per screen (ms)".tl,
+          softWrap: true, maxLines: 2),
+      subtitle: Slider(
+        value: sliderValue,
+        min: _sliderMin,
+        max: _sliderMax,
+        onChanged: (v) {
+          _set(v.toInt());
+        },
+      ),
+      trailing: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: _edit,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("$_value ms", style: ts.s12),
+            Icon(Icons.edit, size: 14, color: context.colorScheme.outline),
+          ],
+        ).paddingHorizontal(4),
+      ),
     );
   }
 }

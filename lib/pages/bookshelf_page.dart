@@ -13,6 +13,7 @@ import 'package:venera/pages/bookshelf_merge_page.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/home_page.dart';
 import 'package:venera/pages/reader/reader.dart';
+import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
 
 class BookshelfPage extends StatefulWidget {
@@ -368,7 +369,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
                   appdata.settings['bookshelfViewMode'] = v;
                   appdata.saveData();
                 }
+                // Apply and close the dialog immediately.
                 this.setState(() {});
+                context.pop();
               },
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -525,6 +528,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
       message: "Deleting comics".tl,
     );
     var startedAt = DateTime.now();
+    setScreenOn(true);
     try {
       await LocalManager().batchDeleteComics(
         localComics,
@@ -549,6 +553,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
         await Future.delayed(minDuration - elapsed);
       }
       controller.close();
+      setScreenOn(false);
     }
   }
 
