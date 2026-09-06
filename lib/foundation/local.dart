@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:isolate';
 
 import 'package:flutter/widgets.dart' show ChangeNotifier;
 import 'package:flutter_saf/flutter_saf.dart';
@@ -577,7 +576,7 @@ class LocalManager with ChangeNotifier {
     notifyListeners();
   }
 
-  void deleteComicChapters(LocalComic c, List<String> chapters) {
+  Future<void> deleteComicChapters(LocalComic c, List<String> chapters) async {
     if (chapters.isEmpty) {
       return;
     }
@@ -610,12 +609,12 @@ class LocalManager with ChangeNotifier {
       }
     }
     if (shouldRemovedDirs.isNotEmpty) {
-      _deleteDirectories(shouldRemovedDirs);
+      await deleteDirectories(shouldRemovedDirs);
     }
     notifyListeners();
   }
 
-  void batchDeleteComics(List<LocalComic> comics, [bool removeFileOnDisk = true, bool removeFavoriteAndHistory = true]) {
+  Future<void> batchDeleteComics(List<LocalComic> comics, {bool removeFileOnDisk = true, bool removeFavoriteAndHistory = true, void Function(int done, int total)? onFileDeleteProgress}) async {
     if (comics.isEmpty) {
       return;
     }
@@ -625,7 +624,8 @@ class LocalManager with ChangeNotifier {
     try {
       for (var c in comics) {
         if (removeFileOnDisk) {
-          var dir = Directory(FilePath.join(path, c.directory));
+          // c.directory may be an absolute path, baseDir handles both cases.
+          var dir = Directory(c.baseDir);
           if (dir.existsSync()) {
             shouldRemovedDirs.add(dir);
           }
@@ -646,29 +646,43 @@ class LocalManager with ChangeNotifier {
     var comicIDs = comics.map((e) => ComicID(e.comicType, e.id)).toList();
 
     if (removeFavoriteAndHistory) {
-      LocalFavoritesManager().batchDeleteComicsInAllFolders(comicIDs);
-      HistoryManager().batchDeleteHistories(comicIDs);
+      // Cleanup must not prevent the files from being deleted.
+      try {
+        LocalFavoritesManager().batchDeleteComicsInAllFolders(comicIDs);
+        HistoryManager().batchDeleteHistories(comicIDs);
+      } catch (e, s) {
+        Log.error("LocalManager", "Failed to clean favorites/history: $e", s);
+      }
     }
 
     notifyListeners();
 
     if (removeFileOnDisk) {
-      _deleteDirectories(shouldRemovedDirs);
+      await deleteDirectories(shouldRemovedDirs,
+          onProgress: onFileDeleteProgress);
     }
   }
 
-  /// Deletes the directories in a separate isolate to avoid blocking the UI thread.
-  static void _deleteDirectories(List<Directory> directories) {
-    Isolate.run(() async {
-      await SAFTaskWorker().init();
-      for (var dir in directories) {
+  /// Deletes the directories one by one, awaiting completion so callers can
+  /// show progress and be sure the files are actually removed.
+  ///
+  /// Must run inside [overrideIO]: on Android, SAF paths (android://...) are
+  /// resolved to flutter_saf's AndroidDirectory, whose native recursive
+  /// delete is far faster than per-file deletion; regular paths use dart:io.
+  static Future<void> deleteDirectories(List<Directory> directories,
+      {void Function(int done, int total)? onProgress}) async {
+    await overrideIO(() async {
+      for (var i = 0; i < directories.length; i++) {
         try {
-          if (dir.existsSync()) {
+          var dir = directories[i];
+          if (await dir.exists()) {
             await dir.delete(recursive: true);
           }
-        } catch (e) {
-          continue;
+        } catch (e, s) {
+          Log.error("LocalManager",
+              "Failed to delete directory(${directories[i].path}): $e", s);
         }
+        onProgress?.call(i + 1, directories.length);
       }
     });
   }

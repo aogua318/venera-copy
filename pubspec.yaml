@@ -2,7 +2,7 @@ name: venera
 description: "A comic app."
 publish_to: 'none'
 
-version: 1.6.3+163
+version: 1.7.0+170
 
 environment:
   sdk: '>=3.8.0 <4.0.0'
@@ -115,3 +115,7 @@ flutter_to_arch:
   depends:
     - gtk3
     - webkit2gtk-4.1
+
+# rhttp's generated code requires this exact frb version
+dependency_overrides:
+  flutter_rust_bridge: 2.11.1

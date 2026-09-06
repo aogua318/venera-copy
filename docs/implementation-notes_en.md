@@ -975,3 +975,52 @@ applicationId = "com.github.wgh136.venera.mod"
 // android/build.gradle — HTTP repositories are rejected by newer Gradle
 maven { url 'https://maven.aliyun.com/nexus/content/groups/public' }
 ```
+
+---
+
+## 11. Follow-up Iterations (v1.7.0): Merge/Import/Delete Polish and Root-Cause Fixes
+
+> This section records changes after section 10, corresponding to chapter 14 of the development document.
+
+### 11.1 Merge: file-level percent progress + ANR crash fix
+
+- **Motivation**: merging large comics "randomly crashed"; progress was chapter-granular.
+- **Root cause**: page file moving/copying was synchronous IO entirely on the main thread; long blocks triggered ANR and the system killed the app.
+- **Implementation**: directory scanning stays on the main thread (lightweight); page files are moved in batches of 100 inside `compute` isolates, reporting progress between batches; the merge page shows a large percentage + progress bar + page counter.
+- **Impact**: UI stays responsive during merges; progress updates in real time; crashes eliminated.
+
+### 11.2 Import: skip existing names (all paths) + progress bars
+
+- **Skip rule**: by comic/folder name, across archive import (previously threw and aborted), directory import, EhViewer import and local restore import; when copying to the local directory, an existing directory is skipped (the original renamed the existing directory aside, which risked data loss).
+- **Progress**: "Importing i/N (xx%)" for multi-archive/multi-directory/EhViewer/local-restore; "Copying i/N (xx%)" with one isolate per comic for the copy phase.
+- **Impact**: `ImportComic` constructor lost `const` (added a skippedCount counter); `CBZ.import` now returns `LocalComic?` (null = skipped).
+
+### 11.3 Local deletion: three rounds to a final fix (important traceability)
+
+| Round | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 1 | Files not removed from disk | Deletion ran fire-and-forget inside `Isolate.run`; `SAFTaskWorker().init()` (a platform-channel call) threw inside the isolate, silently killing the whole deletion | Per-comic isolates with await and progress callbacks |
+| 2 | No progress dialog; confirm dialog stayed open | `pop()` closes the top-most route — opening the progress dialog first made `pop()` close the progress dialog itself | Close the confirm dialog first, then show the progress dialog; the dialog has a 600 ms minimum visible duration |
+| 3 | SAF comics (`android://primary:...`) failed to delete | a) `directory` may be an absolute path, so joining it to the local path was wrong (use `c.baseDir`); b) **SAF operations must run on the main isolate** (the flutter_saf grant registry lives there), and native recursive deletion should be used (an order of magnitude faster); c) favorites/history cleanup exceptions aborted file deletion (now wrapped in try/catch) | `deleteDirectories` wrapped in `overrideIO`, awaited per comic on the main thread; leftovers verified after deletion with a dedicated message |
+
+**Operational note (important)**: SAF grants (`android://primary:...`) are cleared whenever the app is reinstalled. This repo uses the `.mod` package name, so grants are not shared with the official app; repeated reinstalls during development kept wiping them. Symptoms: reads/writes/deletes in that directory all fail (log signature `Cannot create directory specified`). Recovery: re-select the directory in the home-page import flow (re-grants access).
+
+### 11.4 Other fixes and improvements
+
+| Change | File | Notes |
+|---|---|---|
+| New `back` mapping action | `hardware_keys.dart`, `reader.dart` | Closes the reader |
+| Cover update not taking effect | `reader/scaffold.dart` | The image cache key ignores file content; `imageCache.clear()` is called after updating a cover |
+| Delete action in bookshelf selection mode | `bookshelf_page.dart` | Local comics are deleted from disk (with progress); network comics are only removed from the shelf |
+| List/grid cover aspectFit | `bookshelf_page.dart` | `BoxFit.contain` shows the whole image without cropping; the aspect cache was promoted to module level and shared |
+| `markAsRead` null crash (upstream bug) | `favorites.dart` | Early return when `followUpdatesFolder` is null |
+| rhttp version mismatch | `pubspec.yaml` | `dependency_overrides: flutter_rust_bridge: 2.11.1` fixes `Rhttp.init` |
+| Screen turning off during auto play | `reader.dart` + existing `setScreenOn` channel | Keep the screen on while auto scroll / timed page turning runs; restore on stop/exit |
+
+### 11.5 Version history
+
+| Version | Notes |
+|---|---|
+| 1.6.3+163 | Iterations 1–4 feature set; first GitHub Release (4 APKs + Windows zip) |
+| 1.6.4+164 / 1.6.5+165 | Iteration 5 fixes (internal builds) |
+| 1.7.0+170 | Full iteration 5–6 content, official release |

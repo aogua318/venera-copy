@@ -488,7 +488,12 @@
     "Do not leave this page. Large comics may take a while.": "请勿离开本页，大体积漫画可能需要较长时间。",
     "Skipped @a existing comics": "已跳过 @a 个已存在的漫画",
     "Importing @a/@b": "导入中 @a/@b",
-    "Copying @a/@b": "复制中 @a/@b"
+    "Copying @a/@b": "复制中 @a/@b",
+    "Deleting comics": "正在删除漫画",
+    "Deleting @a/@b": "正在删除 @a/@b",
+    "Delete @a comics? Local comics will also be removed from the disk.": "删除选中的 @a 本漫画？本地漫画将同时从磁盘删除。",
+    "Some files failed to delete": "部分文件删除失败",
+    "Failed to delete SAF directories. The storage permission may have expired after reinstalling; delete the files manually or re-import the directory to grant access again.": "SAF 目录删除失败：重装应用后存储授权可能已失效，请手动删除文件，或重新导入该目录以重新授权。"
   },
   "zh_TW": {
     "Home": "首頁",
@@ -979,6 +984,11 @@
     "Do not leave this page. Large comics may take a while.": "請勿離開本頁，大體積漫畫可能需要較長時間。",
     "Skipped @a existing comics": "已跳過 @a 個已存在的漫畫",
     "Importing @a/@b": "匯入中 @a/@b",
-    "Copying @a/@b": "複製中 @a/@b"
+    "Copying @a/@b": "複製中 @a/@b",
+    "Deleting comics": "正在刪除漫畫",
+    "Deleting @a/@b": "正在刪除 @a/@b",
+    "Delete @a comics? Local comics will also be removed from the disk.": "刪除選中的 @a 本漫畫？本地漫畫將同時從磁碟刪除。",
+    "Some files failed to delete": "部分檔案刪除失敗",
+    "Failed to delete SAF directories. The storage permission may have expired after reinstalling; delete the files manually or re-import the directory to grant access again.": "SAF 目錄刪除失敗：重新安裝應用後儲存授權可能已失效，請手動刪除檔案，或重新匯入該目錄以重新授權。"
   }
 }

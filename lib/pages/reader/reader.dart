@@ -281,6 +281,10 @@ class _ReaderState extends State<Reader>
     if (isFullscreen) {
       fullscreen();
     }
+    if (App.isAndroid && _keepScreenOn) {
+      // Restore the system screen timeout when leaving the reader.
+      _methodChannel.invokeMethod('setScreenOn', {'set': false});
+    }
     autoPageTurningTimer?.cancel();
     focusNode.dispose();
     _hardwareKeyListener?.cancel();
@@ -350,10 +354,27 @@ class _ReaderState extends State<Reader>
 
   bool get isAutoScrolling => autoPageTurningTimer != null || _autoScrollActive;
 
+  static const _methodChannel = MethodChannel('venera/method_channel');
+
+  bool _keepScreenOn = false;
+
+  /// Keep the screen on while auto play (smooth scrolling or timed page
+  /// turning) is running, restore the system behavior when it stops.
+  void _updateKeepScreenOn() {
+    var shouldKeep = _autoScrollActive || autoPageTurningTimer != null;
+    if (shouldKeep != _keepScreenOn) {
+      _keepScreenOn = shouldKeep;
+      if (App.isAndroid) {
+        _methodChannel.invokeMethod('setScreenOn', {'set': shouldKeep});
+      }
+    }
+  }
+
   void setAutoScrollActive(bool value) {
     if (_autoScrollActive != value) {
       _autoScrollActive = value;
       update();
+      _updateKeepScreenOn();
     }
   }
 
@@ -801,6 +822,9 @@ abstract mixin class _ReaderLocation {
   int _page = 1;
   int? _pendingPage;
 
+  /// Implemented by [_ReaderState]: keeps the screen on while auto play runs.
+  void _updateKeepScreenOn();
+
   /// Flag to indicate that the page should jump to the last page after images are loaded.
   bool _jumpToLastPageOnLoad = false;
 
@@ -920,6 +944,7 @@ abstract mixin class _ReaderLocation {
     if (autoPageTurningTimer != null) {
       autoPageTurningTimer!.cancel();
       autoPageTurningTimer = null;
+      _updateKeepScreenOn();
     } else {
       int interval = appdata.settings.getReaderSetting(
         cid,
@@ -929,9 +954,12 @@ abstract mixin class _ReaderLocation {
       autoPageTurningTimer = Timer.periodic(Duration(seconds: interval), (_) {
         if (page == maxPage) {
           autoPageTurningTimer!.cancel();
+          autoPageTurningTimer = null;
+          _updateKeepScreenOn();
         }
         toNextPage();
       });
+      _updateKeepScreenOn();
     }
   }
 }

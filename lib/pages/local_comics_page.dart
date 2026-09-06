@@ -429,13 +429,68 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                   },
                 ),
               FilledButton(
-                onPressed: () {
+                onPressed: () async {
+                  // Close the confirm dialog first, then show the progress
+                  // dialog (pop() always closes the top-most route, so
+                  // showing the progress dialog first would make pop()
+                  // close the progress dialog instead).
                   context.pop();
-                  LocalManager().batchDeleteComics(
-                    comics,
-                    removeComicFile,
-                    removeFavoriteAndHistory,
+                  var controller = showLoadingDialog(
+                    App.rootContext,
+                    allowCancel: false,
+                    withProgress: true,
+                    message: "Deleting comics".tl,
                   );
+                  var startedAt = DateTime.now();
+                  try {
+                    await LocalManager().batchDeleteComics(
+                      comics,
+                      removeFileOnDisk: removeComicFile,
+                      removeFavoriteAndHistory: removeFavoriteAndHistory,
+                      onFileDeleteProgress: (done, total) {
+                        controller.setMessage(
+                            "Deleting @a/@b".tlParams({
+                          'a': done,
+                          'b': total,
+                        }));
+                        controller.setProgress(total == 0 ? null : done / total);
+                      },
+                    );
+                  } finally {
+                    // Keep the dialog visible for a moment so the user
+                    // always sees the deletion feedback.
+                    var elapsed = DateTime.now().difference(startedAt);
+                    const minDuration = Duration(milliseconds: 600);
+                    if (elapsed < minDuration) {
+                      await Future.delayed(minDuration - elapsed);
+                    }
+                    controller.close();
+                  }
+                  if (removeComicFile) {
+                    // Verify the directories are actually gone.
+                    var leftovers = <String>[];
+                    var safFailed = false;
+                    for (var c in comics) {
+                      var dir = Directory(c.baseDir);
+                      if (dir.existsSync()) {
+                        leftovers.add(dir.path);
+                        if (dir.path.startsWith('android://')) {
+                          safFailed = true;
+                        }
+                      }
+                    }
+                    if (leftovers.isNotEmpty) {
+                      Log.error(
+                          "LocalManager",
+                          "Failed to delete directories",
+                          leftovers.join('\n'));
+                      App.rootContext.showMessage(
+                          message: safFailed
+                              ? "Failed to delete SAF directories. The storage permission may have expired after reinstalling; delete the files manually or re-import the directory to grant access again."
+                                  .tl
+                              : "Some files failed to delete".tl);
+                    }
+                  }
                   isDeleted = true;
                 },
                 child: Text("Confirm".tl),

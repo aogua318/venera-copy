@@ -69,16 +69,20 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  "Merging @a/@b".tlParams({
-                    'a': progressDone,
-                    'b': progressTotal,
-                  }),
-                  style: ts.s16,
+                  "${progressTotal == 0 ? 0 : (progressDone * 100 / progressTotal).toStringAsFixed(0)}%",
+                  style: ts.s24,
                 ),
                 const SizedBox(height: 16),
                 LinearProgressIndicator(
-                  value: progressTotal == 0 ? null : progressDone / progressTotal,
+                  value: progressTotal == 0
+                      ? null
+                      : progressDone / progressTotal,
                 ).fixWidth(240),
+                const SizedBox(height: 16),
+                Text(
+                  "$progressDone / $progressTotal",
+                  style: ts.s12.copyWith(color: context.colorScheme.outline),
+                ),
                 const SizedBox(height: 16),
                 Text(
                   "Do not leave this page. Large comics may take a while."
@@ -225,11 +229,14 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
       throw Exception("No pages found in the selected comics");
     }
 
-    // Move the page files chapter by chapter in isolates, reporting progress.
+    // Move the page files in small batches inside isolates, reporting
+    // file-level progress so the percentage updates in real time.
     var chapters = <String, String>{};
-    progressTotal = plan.length;
+    progressTotal = plan.fold(0, (sum, c) => sum + c.$2.length);
     if (mounted) setState(() {});
     int chapterIndex = 0;
+    int filesDone = 0;
+    const batchSize = 100;
     for (var (title, files) in plan) {
       var chapterDir = Directory(FilePath.join(dest.path, "$chapterIndex"));
       chapterDir.createSync();
@@ -240,11 +247,15 @@ class _BookshelfMergePageState extends State<BookshelfMergePage> {
             FilePath.join(chapterDir.path, '${i + 1}.${files[i].split('.').last}'),
           ]
       ];
-      await compute(_moveChapterFiles, pairs);
+      for (var i = 0; i < pairs.length; i += batchSize) {
+        var end = (i + batchSize) < pairs.length ? (i + batchSize) : pairs.length;
+        await compute(_moveChapterFiles, pairs.sublist(i, end));
+        filesDone += end - i;
+        progressDone = filesDone;
+        if (mounted) setState(() {});
+      }
       chapters[chapterIndex.toString()] = title;
       chapterIndex++;
-      progressDone = chapterIndex;
-      if (mounted) setState(() {});
     }
 
     var comic = LocalComic(

@@ -975,3 +975,52 @@ applicationId = "com.github.wgh136.venera.mod"
 // android/build.gradle —— HTTP 协议仓库被新版 Gradle 拒绝，改为 HTTPS
 maven { url 'https://maven.aliyun.com/nexus/content/groups/public' }
 ```
+
+---
+
+## 11. 追加迭代（v1.7.0）：合并/导入/删除打磨与修复
+
+> 本节记录第 10 节之后的追加改动，与开发文档第 14 节对应。
+
+### 11.1 合并：文件粒度百分比进度 + 修 ANR 闪退
+
+- **目的**：合并大漫画时"有几率闪退"；进度只有章节粒度。
+- **根因**：页面文件移动/复制为同步 IO 且全在主线程，长时间阻塞触发 ANR 被系统强杀。
+- **实现**：目录扫描留在主线程（轻量）；页面文件按 100 文件/批在 `compute` isolate 中移动，批间回报进度；合并页显示大字号百分比 + 进度条 + 页数计数。
+- **影响**：合并全程 UI 可响应；进度实时走动；闪退消除。
+
+### 11.2 导入：跳过同名（全路径）+ 进度条
+
+- **跳过规则**：按漫画名/文件夹名判断，覆盖归档导入（原为抛异常中断）、目录导入、EhViewer 导入、本地恢复导入；复制到本地目录时同名目录跳过（原版会把已存在目录改名挪走，存在数据风险，已改为跳过）。
+- **进度**：多压缩包/多目录/EhViewer/本地恢复显示"导入中 i/N (xx%)"；复制阶段一本一 isolate，显示"复制中 i/N (xx%)"。
+- **影响**：`ImportComic` 构造函数去 const（新增 skippedCount 计数）；`CBZ.import` 返回值改为 `LocalComic?`（null = 跳过）。
+
+### 11.3 本地删除：三轮修复终局（重要追溯）
+
+| 轮次 | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | 删除后磁盘文件未删 | 删除在 `Isolate.run` 中 fire-and-forget；isolate 内 `SAFTaskWorker().init()`（平台通道调用）抛错 → 整个删除 isolate 静默死亡 | 逐本 isolate + await + 进度回调 |
+| 2 | 进度框未弹、确认框未自动关闭 | `pop()` 关闭栈顶路由——先弹进度框再 `pop()` 会误关进度框 | 先关确认框、再弹进度框；进度框加 600ms 最短显示时长 |
+| 3 | SAF 漫画（`android://primary:...`）删除失败 | a) `directory` 为绝对路径时拼错位置（改用 `c.baseDir`）；b) **SAF 操作必须在主线程**（flutter_saf 授权注册表在主 isolate），且应使用原生递归删除（快一个数量级）；c) 收藏/历史清理异常会阻断文件删除（包 try/catch） | `deleteDirectories` 包 `overrideIO` 并在主线程逐本 await；删完校验残留，SAF 失败弹专项提示 |
+
+**运维知识（重要）**：SAF 授权（`android://primary:...`）随应用重装而清空。本仓库包名为 `.mod`，与官方版授权互不继承；开发期反复重装导致授权频繁丢失，表现为该目录读取/写入/删除全部失败（日志特征 `Cannot create directory specified`）。恢复方式：首页导入中重新选择该目录（重新授权）。
+
+### 11.4 其他修复与改进
+
+| 改动 | 文件 | 说明 |
+|---|---|---|
+| 映射动作新增 `back`（返回） | `hardware_keys.dart`、`reader.dart` | 触发关闭阅读页 |
+| 设为封面后图片缓存未失效 | `reader/scaffold.dart` | 缓存键不含文件内容，封面更新后调用 `imageCache.clear()` 立即生效 |
+| 书架选择模式新增删除 | `bookshelf_page.dart` | 本地漫画连磁盘删除（进度框），网络漫画仅移出书架 |
+| 列表/网格封面 aspectFit | `bookshelf_page.dart` | `BoxFit.contain` 长边贴边完整展示，不再裁切；封面比例缓存提升为模块级共享 |
+| `markAsRead` 空指针（上游 bug） | `favorites.dart` | `followUpdatesFolder` 为 null 时提前返回 |
+| rhttp 版本不匹配 | `pubspec.yaml` | `dependency_overrides: flutter_rust_bridge: 2.11.1`，修复 `Rhttp.init` 失败 |
+| 自动播放熄屏 | `reader.dart` + 既有 `setScreenOn` 通道 | 自动滚动/定时翻页期间保持屏幕常亮，停止/退出恢复 |
+
+### 11.5 版本历史
+
+| 版本 | 说明 |
+|---|---|
+| 1.6.3+163 | 迭代 1–4 功能集，首次发布 GitHub Release（4 APK + Windows zip） |
+| 1.6.4+164 / 1.6.5+165 | 迭代 5 修复（未发布，内部构建） |
+| 1.7.0+170 | 迭代 5–6 全部内容，正式发布 |

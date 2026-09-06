@@ -59,7 +59,11 @@ class ImportComic {
       var comics = <LocalComic>[];
       for (var i = 0; i < files.length; i++) {
         controller.setMessage(
-            "Importing @a/@b".tlParams({'a': i + 1, 'b': files.length}));
+            "Importing @a/@b (@c%)".tlParams({
+          'a': i + 1,
+          'b': files.length,
+          'c': files.isEmpty ? 0 : (i * 100 / files.length).round(),
+        }));
         controller.setProgress(files.isEmpty ? null : i / files.length);
         try {
           var comic = await CBZ.import(files[i]);
@@ -107,7 +111,11 @@ class ImportComic {
             return imported;
           }
           controller.setMessage(
-              "Importing @a/@b".tlParams({'a': i + 1, 'b': comics.length}));
+              "Importing @a/@b (@c%)".tlParams({
+            'a': i + 1,
+            'b': comics.length,
+            'c': comics.isEmpty ? 0 : (i * 100 / comics.length).round(),
+          }));
           controller.setProgress(comics.isEmpty ? null : i / comics.length);
           var comicDir = Directory(
               FilePath.join(comicSrc.path, comic['DIRNAME'] as String));
@@ -206,7 +214,11 @@ class ImportComic {
         var dirs = (await path.list().toList()).whereType<Directory>().toList();
         for (var i = 0; i < dirs.length; i++) {
           controller.setMessage(
-              "Importing @a/@b".tlParams({'a': i + 1, 'b': dirs.length}));
+              "Importing @a/@b (@c%)".tlParams({
+            'a': i + 1,
+            'b': dirs.length,
+            'c': dirs.isEmpty ? 0 : (i * 100 / dirs.length).round(),
+          }));
           controller.setProgress(dirs.isEmpty ? null : i / dirs.length);
           var result = await _checkSingleComic(dirs[i]);
           if (result.$1 != null) {
@@ -245,7 +257,11 @@ class ImportComic {
         }
         var entry = comicDirs[i];
         controller.setMessage(
-            "Importing @a/@b".tlParams({'a': i + 1, 'b': comicDirs.length}));
+            "Importing @a/@b (@c%)".tlParams({
+          'a': i + 1,
+          'b': comicDirs.length,
+          'c': comicDirs.isEmpty ? 0 : (i * 100 / comicDirs.length).round(),
+        }));
         controller
             .setProgress(comicDirs.isEmpty ? null : i / comicDirs.length);
         var stat = await entry.stat();
@@ -396,8 +412,12 @@ class ImportComic {
         var list = comics[favoriteFolder]!;
         var pathMap = <String, String>{};
         for (var i = 0; i < list.length; i++) {
-          onProgress?.call("Copying @a/@b"
-              .tlParams({'a': i + 1, 'b': list.length}),
+          onProgress?.call(
+              "Copying @a/@b (@c%)".tlParams({
+                'a': i + 1,
+                'b': list.length,
+                'c': list.isEmpty ? 0 : (i * 100 / list.length).round(),
+              }),
               list.isEmpty ? null : i / list.length);
           var m = await compute<Map<String, dynamic>, Map<String, String>>(
               _copyDirectories, {

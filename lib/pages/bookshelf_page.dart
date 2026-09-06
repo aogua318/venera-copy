@@ -105,6 +105,11 @@ class _BookshelfPageState extends State<BookshelfPage> {
               onPressed: openMergePage,
             ),
           IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: "Delete".tl,
+            onPressed: deleteSelectedComics,
+          ),
+          IconButton(
             icon: const Icon(Icons.bookmark_remove_outlined),
             tooltip: "Remove from bookshelf".tl,
             onPressed: () {
@@ -483,6 +488,70 @@ class _BookshelfPageState extends State<BookshelfPage> {
     }
   }
 
+  /// Delete the selected comics from the app (and their files on disk for
+  /// local comics), with a progress dialog.
+  void deleteSelectedComics() async {
+    var localComics = selected
+        .map((e) => LocalManager().find(e.id, e.type))
+        .whereType<LocalComic>()
+        .toList();
+    var confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return ContentDialog(
+          title: "Delete".tl,
+          content: Text(
+            "Delete @a comics? Local comics will also be removed from the disk."
+                .tlParams({'a': selected.length}),
+          ),
+          actions: [
+            Button.text(
+              onPressed: () => context.pop(false),
+              child: Text("Cancel".tl),
+            ),
+            Button.filled(
+              onPressed: () => context.pop(true),
+              child: Text("Confirm".tl),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    var controller = showLoadingDialog(
+      App.rootContext,
+      allowCancel: false,
+      withProgress: true,
+      message: "Deleting comics".tl,
+    );
+    var startedAt = DateTime.now();
+    try {
+      await LocalManager().batchDeleteComics(
+        localComics,
+        removeFileOnDisk: true,
+        removeFavoriteAndHistory: true,
+        onFileDeleteProgress: (done, total) {
+          controller.setMessage("Deleting @a/@b"
+              .tlParams({'a': done, 'b': total}));
+          controller.setProgress(total == 0 ? null : done / total);
+        },
+      );
+      // Remove all selected entries from the shelf (local comics are gone,
+      // network comics are only removed from the shelf).
+      for (var entry in selected) {
+        BookshelfManager().remove(entry.id, entry.type);
+      }
+      exitSelectionMode();
+    } finally {
+      var elapsed = DateTime.now().difference(startedAt);
+      const minDuration = Duration(milliseconds: 600);
+      if (elapsed < minDuration) {
+        await Future.delayed(minDuration - elapsed);
+      }
+      controller.close();
+    }
+  }
+
   /// Run the same import flow as the home page's local import, then add the
   /// newly imported comics to the shelf.
   void import() async {
@@ -559,6 +628,8 @@ class _WaterfallTileState extends State<_WaterfallTile> {
 
   ImageStream? _stream;
   ImageStreamListener? _listener;
+
+  double? get _fixedAspect => widget.fixedAspect;
 
   String get _cacheKey => "${widget.comic.sourceKey}@${widget.comic.id}";
 
@@ -637,7 +708,9 @@ class _WaterfallTileState extends State<_WaterfallTile> {
                     child: Image(
                       image: _provider!,
                       width: double.infinity,
-                      fit: BoxFit.cover,
+                      fit: _fixedAspect != null
+                          ? BoxFit.contain
+                          : BoxFit.cover,
                       filterQuality: FilterQuality.medium,
                     ),
                   ),
@@ -746,21 +819,20 @@ class _BookshelfListTileState extends State<_BookshelfListTile> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: _provider == null
-                ? Container(
-                    width: 36,
-                    height: widget.height,
-                    color: context.colorScheme.secondaryContainer,
-                  )
-                : SizedBox(
-                    height: widget.height,
-                    width: (widget.height * _aspect).clamp(36.0, 280.0),
-                    child: Image(
+            child: Container(
+              width: _provider == null
+                  ? 36.0
+                  : (widget.height * _aspect).clamp(36.0, 280.0),
+              height: widget.height,
+              color: context.colorScheme.secondaryContainer,
+              child: _provider == null
+                  ? null
+                  : Image(
                       image: _provider!,
-                      fit: BoxFit.cover,
+                      fit: BoxFit.contain,
                       filterQuality: FilterQuality.medium,
                     ),
-                  ),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(

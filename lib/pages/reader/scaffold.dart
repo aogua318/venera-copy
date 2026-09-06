@@ -753,6 +753,9 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
         createdAt: comic.createdAt,
       );
       await LocalManager().add(newComic, comic.id);
+      // The image cache key does not include the file content, so the cache
+      // must be cleared for the new cover to show up.
+      PaintingBinding.instance.imageCache.clear();
       showToast(context: context, message: "Cover updated".tl);
     } catch (e) {
       showToast(context: context, message: e.toString());
